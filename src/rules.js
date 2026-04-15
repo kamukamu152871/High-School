@@ -66,6 +66,7 @@ export function applyTraining(state, trainingId) {
 
 export const EVENTS_RECORD = ["1500", "3000", "5000"];
 export const EVENTS_MEET = ["800", "1500", "3000sc", "5000", "5000w"];
+export const EVENTS_EKIDEN = ["10000", "3000", "8000", "5000"];
 
 export function calcEventPower(athlete, event) {
   const ab = athlete.abilities;
@@ -80,6 +81,10 @@ export function calcEventPower(athlete, event) {
   if (event === "800") v = (ab.sprint * 3 + ab.toughness * 2) / 5;
   if (event === "3000sc") v = (ab.speed + ab.stamina + ab.technique * 3) / 5;
   if (event === "5000w") v = (ab.toughness * 2 + ab.technique * 3) / 5;
+
+  // 駅伝
+  if (event === "8000") v = (ab.stamina * 3 + ab.toughness * 2) / 5;
+  if (event === "10000") v = (ab.stamina * 2 + ab.toughness * 3) / 5;
 
   return v;
 }
@@ -105,11 +110,10 @@ export function calcTimeSecondsFromPower(event, n) {
     return t;
   }
 
-  // 総体（あなたの仕様）
+  // 総体
   if (event === "800") {
-    // 150−0.424(n−1) 小数第三位四捨五入 → ±1.5（小数第二位）
     let t = 150 - 0.424 * (n - 1);
-    t = Math.round(t * 100) / 100; // 小数第3位四捨五入=小数2位まで
+    t = Math.round(t * 100) / 100; // 小数2位まで
     t += Math.round(randFloat(-1.5, 1.5) * 100) / 100;
     return t;
   }
@@ -126,13 +130,27 @@ export function calcTimeSecondsFromPower(event, n) {
     return t;
   }
 
+  // 駅伝
+  if (event === "8000") {
+    let t = 1800 - 4.242 * (n - 1);
+    t = Math.round(t * 10) / 10;
+    t += randInt(-5, 5);
+    return t;
+  }
+  if (event === "10000") {
+    let t = 2520 - 7.980 * (n - 1);
+    t = Math.round(t * 10) / 10;
+    t += randInt(-5, 5);
+    return t;
+  }
+
   return 9999;
 }
 
 export function formatTime(sec, digits = 1) {
   const m = Math.floor(sec / 60);
   const s = (sec - m * 60).toFixed(digits);
-  const pad = digits === 0 ? 2 : (digits + 3); // 例: "10.4" は4文字
+  const pad = digits === 0 ? 2 : (digits + 3);
   const s2 = s.padStart(pad, "0");
   return `${m}:${s2}`;
 }
