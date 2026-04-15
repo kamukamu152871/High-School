@@ -83,6 +83,7 @@ export function createNewGameState() {
     trainingDoneThisWeek: false,
     lastTraining: null,
     lastMeetResult: null,
+    rivals: null,
   };
 }
 
