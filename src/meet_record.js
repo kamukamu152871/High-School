@@ -1,5 +1,4 @@
 import {
-  EVENTS_RECORD,
   calcEventPower,
   calcTimeSecondsFromPower,
   groupBySize,
@@ -8,76 +7,10 @@ import {
   shuffle,
 } from "./rules.js";
 
-// 相手校（同地区群）を簡略生成：20校、各15人
-function createRivalSchoolsForRecord() {
-  const schools = [];
-  for (let i = 0; i < 20; i++) {
-    schools.push({
-      name: `地区高校${i + 1}`,
-      athletes: createRivalAthletes15(),
-    });
-  }
-  return schools;
-}
+// 相手校（同地区群）を state.rivals.district ���使う（能力補正なし方針）
+// ただし record は「同地区群」と仕様にあるため district を利用
 
-function createRivalAthletes15() {
-  // 自校に近い強さにしたいので、全員 30〜70 の間でランダム（簡略）
-  const athletes = [];
-  for (let i = 0; i < 15; i++) {
-    athletes.push({
-      name: `相手選手${i + 1}`,
-      abilities: {
-        sprint: randInt(30, 70),
-        speed: randInt(30, 70),
-        stamina: randInt(30, 70),
-        toughness: randInt(30, 70),
-        technique: randInt(30, 70),
-      },
-    });
-  }
-  return athletes;
-}
-
-function autoAssignPlayerEntries(state) {
-  // 自校の全選手が「1人1種目」：15人を 1500/3000/5000 に均等割り
-  const events = ["1500", "3000", "5000"];
-  const shuffled = shuffle(state.athletes);
-
-  const entries = [];
-  for (let i = 0; i < shuffled.length; i++) {
-    const event = events[i % events.length];
-    entries.push({
-      school: state.teamName,
-      isPlayer: true,
-      athlete: shuffled[i],
-      event,
-    });
-  }
-  return entries;
-}
-
-function pickRivalEntries(schools) {
-  // 各校の選手：1人1種目（同じく均等割りで簡略）
-  const entries = [];
-  const events = ["1500", "3000", "5000"];
-
-  for (const s of schools) {
-    const shuffled = shuffle(s.athletes);
-    for (let i = 0; i < shuffled.length; i++) {
-      const event = events[i % events.length];
-      entries.push({
-        school: s.name,
-        isPlayer: false,
-        athlete: shuffled[i],
-        event,
-      });
-    }
-  }
-  return entries;
-}
-
-function runEvent(entriesOfEvent) {
-  // 30人グループに分けて、それぞれタイム計算して順位
+function runEvent(entriesOfEvent, eventName) {
   const groups = groupBySize(entriesOfEvent, 30);
   const results = [];
 
@@ -95,7 +28,7 @@ function runEvent(entriesOfEvent) {
       results.push({
         ...raced[i],
         rankInGroup: i + 1,
-        timeText: formatTime(raced[i].timeSec),
+        timeText: formatTime(raced[i].timeSec, 1),
       });
     }
   }
@@ -103,16 +36,34 @@ function runEvent(entriesOfEvent) {
   return results;
 }
 
-export function runRecordMeet(state) {
-  const rivals = createRivalSchoolsForRecord();
+function pickRivalEntriesFromState(state) {
+  const rivals = state.rivals?.district ?? [];
+  const entries = [];
+  const events = ["1500", "3000", "5000"];
 
-  const playerEntries = autoAssignPlayerEntries(state);
-  const rivalEntries = pickRivalEntries(rivals);
+  for (const s of rivals) {
+    const shuffled = shuffle(s.athletes);
+    for (let i = 0; i < shuffled.length; i++) {
+      const event = events[i % events.length];
+      entries.push({ school: s.name, isPlayer: false, athlete: shuffled[i], event });
+    }
+  }
+  return entries;
+}
+
+// playerPicks: [{athlete, event}]（15人全員、1人1種目）
+export function runRecordMeet(state, playerPicks) {
+  const playerEntries = playerPicks.map(p => ({
+    school: state.teamName,
+    isPlayer: true,
+    athlete: p.athlete,
+    event: p.event,
+  }));
+
+  const rivalEntries = pickRivalEntriesFromState(state);
   const all = playerEntries.concat(rivalEntries);
 
-  const byEvent = {};
-  for (const ev of EVENTS_RECORD) byEvent[ev] = [];
-
+  const byEvent = { "1500": [], "3000": [], "5000": [] };
   for (const e of all) byEvent[e.event].push(e);
 
   const results = {
@@ -120,22 +71,23 @@ export function runRecordMeet(state) {
     title: "記録会",
     when: `${state.month}月${state.week}週`,
     events: {},
+    playerOnly: {},
   };
 
-  for (const ev of EVENTS_RECORD) {
-    results.events[ev] = runEvent(byEvent[ev]);
+  for (const ev of Object.keys(byEvent)) {
+    results.events[ev] = runEvent(byEvent[ev], ev);
   }
 
-  // 自校の結果だけ抜き出し（表示用）
-  results.playerOnly = {};
-  for (const ev of EVENTS_RECORD) {
-    const arr = results.events[ev].filter(x => x.isPlayer);
-    // グループ順位だけだと比較しにくいので、種目内での全体順位も付ける（簡略：全体で並べた順位）
+  // 自校表示用（種目内の全体順位も付ける）
+  for (const ev of Object.keys(byEvent)) {
     const allSorted = results.events[ev].slice().sort((a, b) => a.timeSec - b.timeSec);
     const indexMap = new Map(allSorted.map((x, i) => [x, i + 1]));
-    results.playerOnly[ev] = arr
+    const arr = results.events[ev]
+      .filter(x => x.isPlayer)
       .map(x => ({ ...x, overallRank: indexMap.get(x) }))
       .sort((a, b) => a.overallRank - b.overallRank);
+
+    results.playerOnly[ev] = arr;
   }
 
   state.lastMeetResult = results;
