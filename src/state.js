@@ -79,6 +79,10 @@ export function createNewGameState() {
     week: 1,
     teamName: "自校",
     athletes: createInitialAthletes(),
+
+    trainingDoneThisWeek: false,
+    lastTraining: null,
+    lastMeetResult: null,
   };
 }
 
