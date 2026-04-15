@@ -178,6 +178,17 @@ function renderHome(state) {
 
       if (meet.type === "soutai") {
         const allowed = getAllowedSoutaiEventsForStage(state, meet.stage);
+          // ★追加：通過種目が0なら出場不可
+        if (Array.isArray(allowed) && allowed.length === 0) {
+          renderSimpleMessage(
+            state,
+            `${stageTitleSoutai(meet.stage)}：出場できる種目がありません（前大会で通過なし）`,
+            "OK（次の週へ）",
+            () => goNextWeek(state)
+          );
+          return;
+       }
+
         renderPicker(app, "soutai", state, {
           allowedEvents: allowed,
           onCancel: () => renderHome(state),
@@ -197,7 +208,7 @@ function renderHome(state) {
           saveGame(state);
           renderSimpleMessage(state, `${stageTitleEkiden(meet.stage)}：出場条件を満たしていません`, "ホームへ", () => renderHome(state));
           return;
-        }
+      }
 
         renderPicker(app, "ekiden", state, {
           onCancel: () => renderHome(state),
