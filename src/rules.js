@@ -24,8 +24,8 @@ export const TRAININGS = [
 
 // 性格ボーナス（練習で上がった能力に追加で加算）
 export function personalityBonus(personality, stat) {
-  if (personality === "てんさい") return 2;   // 何でも+2
-  if (personality === "ふつう") return 1;     // 何でも+1
+  if (personality === "てんさい") return 2; // 何でも+2
+  if (personality === "ふつう") return 1;   // 何でも+1
 
   const map = {
     "たんき": "sprint",
@@ -46,7 +46,7 @@ export function recalcOverall(a) {
   a.overall = Math.round((ab.sprint + ab.speed + ab.stamina + ab.toughness + ab.technique) / 5);
 }
 
-// 練習を全選手に適用（あなたの仕様：選んだ練習に対応する能力が+1〜+3、性格で追加）
+// 練習を全選手に適用
 export function applyTraining(state, trainingId) {
   const t = TRAININGS.find(x => x.id === trainingId);
   if (!t) return;
@@ -62,24 +62,31 @@ export function applyTraining(state, trainingId) {
   state.trainingDoneThisWeek = true;
 }
 
-// --- 記録会（1500/3000/5000）用のルール ---
+// --- 種目ルール ---
 
 export const EVENTS_RECORD = ["1500", "3000", "5000"];
+export const EVENTS_MEET = ["800", "1500", "3000sc", "5000", "5000w"];
 
 export function calcEventPower(athlete, event) {
   const ab = athlete.abilities;
   let v = 0;
+
+  // 記録会
   if (event === "1500") v = (ab.sprint + ab.speed * 3 + ab.stamina) / 5;
   if (event === "3000") v = (ab.sprint + ab.speed * 2 + ab.stamina * 2) / 5;
   if (event === "5000") v = (ab.speed * 2 + ab.stamina * 2 + ab.toughness) / 5;
+
+  // 総体
+  if (event === "800") v = (ab.sprint * 3 + ab.toughness * 2) / 5;
+  if (event === "3000sc") v = (ab.speed + ab.stamina + ab.technique * 3) / 5;
+  if (event === "5000w") v = (ab.toughness * 2 + ab.technique * 3) / 5;
+
   return v;
 }
 
-// 丸め＋乱数（仕様通り）
 export function calcTimeSecondsFromPower(event, n) {
-  // n は種目総合値（小数OK）
+  // 記録会
   if (event === "1500") {
-    // 310 − 0.859(n−1) を小数第一位四捨五入、その後 ±5（整数）
     let t = 310 - 0.859 * (n - 1);
     t = Math.round(t * 10) / 10;
     t += randInt(-5, 5);
@@ -97,22 +104,42 @@ export function calcTimeSecondsFromPower(event, n) {
     t += randInt(-5, 5);
     return t;
   }
+
+  // 総体（あなたの仕様）
+  if (event === "800") {
+    // 150−0.424(n−1) 小数第三位四捨五入 → ±1.5（小数第二位）
+    let t = 150 - 0.424 * (n - 1);
+    t = Math.round(t * 100) / 100; // 小数第3位四捨五入=小数2位まで
+    t += Math.round(randFloat(-1.5, 1.5) * 100) / 100;
+    return t;
+  }
+  if (event === "3000sc") {
+    let t = 750 - 2.273 * (n - 1);
+    t = Math.round(t * 10) / 10;
+    t += randInt(-5, 5);
+    return t;
+  }
+  if (event === "5000w") {
+    let t = 2100 - 9.394 * (n - 1);
+    t = Math.round(t * 10) / 10;
+    t += randInt(-5, 5);
+    return t;
+  }
+
   return 9999;
 }
 
-export function formatTime(sec) {
-  // 例: 310.4 -> 5:10.4
+export function formatTime(sec, digits = 1) {
   const m = Math.floor(sec / 60);
-  const s = (sec - m * 60).toFixed(1).padStart(4, "0");
-  return `${m}:${s}`;
+  const s = (sec - m * 60).toFixed(digits);
+  const pad = digits === 0 ? 2 : (digits + 3); // 例: "10.4" は4文字
+  const s2 = s.padStart(pad, "0");
+  return `${m}:${s2}`;
 }
 
-// 30人ずつグループ
 export function groupBySize(entries, size) {
   const shuffled = shuffle(entries);
   const groups = [];
-  for (let i = 0; i < shuffled.length; i += size) {
-    groups.push(shuffled.slice(i, i + size));
-  }
+  for (let i = 0; i < shuffled.length; i += size) groups.push(shuffled.slice(i, i + size));
   return groups;
 }
