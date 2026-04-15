@@ -1,0 +1,315 @@
+import { EVENTS_MEET } from "./rules.js";
+
+// UIを描画して、確定したら onConfirm(picks) を呼ぶ
+// picksの形式は mode によって変える（後述）
+export function renderPicker(app, mode, state, context) {
+  if (mode === "record") return renderRecordPicker(app, state, context);
+  if (mode === "soutai") return renderSoutaiPicker(app, state, context);
+  if (mode === "ekiden") return renderEkidenPicker(app, state, context);
+  throw new Error("unknown picker mode");
+}
+
+// --- 共通 ---
+function btn(html, id) {
+  return `<button id="${id}">${html}</button>`;
+}
+function smallBtn(html, id) {
+  return `<button id="${id}" style="background:#444;">${html}</button>`;
+}
+function athleteLabel(a) {
+  return `${a.grade}年 ${a.name}（${a.personality} / 総合${a.overall}）`;
+}
+
+// ======================================================
+// 記録会：15人を 1500/3000/5000 に必ず1人1種目
+// picks: [{athlete, event} ...]（athleteはstate.athletesの参照）
+// ======================================================
+function renderRecordPicker(app, state, { onCancel, onConfirm }) {
+  const events = ["1500", "3000", "5000"];
+  const picks = new Map(); // athlete.id -> event
+
+  function isValid() {
+    // 全員割当済み
+    return state.athletes.every(a => picks.has(a.id));
+  }
+
+  function draw() {
+    const rows = state.athletes.map(a => {
+      const current = picks.get(a.id) ?? "";
+      const options = events.map(ev => `
+        <label style="margin-right:10px;">
+          <input type="radio" name="ev_${a.id}" value="${ev}" ${current === ev ? "checked" : ""}/>
+          ${ev}m
+        </label>
+      `).join("");
+
+      return `
+        <div style="padding:8px;border-top:1px solid #eee;">
+          <div style="font-weight:700;">${athleteLabel(a)}</div>
+          <div style="margin-top:6px;">${options}</div>
+        </div>
+      `;
+    }).join("");
+
+    app.innerHTML = `
+      <div class="card">
+        <h2>出場選出：記録会</h2>
+        <p style="color:#555;">全選手を1種目に割り当ててください（1500/3000/5000）</p>
+        <div style="max-height:55vh; overflow:auto; border:1px solid #eee; border-radius:8px;">
+          ${rows}
+        </div>
+        <div class="row" style="margin-top:12px;">
+          ${btn("確定", "ok")}
+          ${smallBtn("戻る", "cancel")}
+        </div>
+        <p style="margin-top:8px;color:${isValid() ? "#0a0" : "#b00"};">
+          ${isValid() ? "OK：全員割り当て済み" : "未割り当ての選手がいます"}
+        </p>
+      </div>
+    `;
+
+    // イベント
+    app.querySelectorAll("input[type=radio]").forEach(r => {
+      r.onchange = () => {
+        const [_, id] = r.name.split("ev_");
+        picks.set(id, r.value);
+        draw();
+      };
+    });
+
+    document.querySelector("#ok").onclick = () => {
+      if (!isValid()) return;
+      const arr = state.athletes.map(a => ({ athlete: a, event: picks.get(a.id) }));
+      onConfirm(arr);
+    };
+    document.querySelector("#cancel").onclick = () => onCancel();
+  }
+
+  draw();
+}
+
+// ======================================================
+// 総体：各種目最大3人、1人最大2種目
+// picks: [{athlete, event} ...]
+// allowedEvents: 通過種目限定（県/地域/全国で使用）
+// ======================================================
+function renderSoutaiPicker(app, state, { allowedEvents = null, onCancel, onConfirm }) {
+  const events = allowedEvents ?? EVENTS_MEET;
+  const picks = []; // {athlete, event}
+
+  function countByEvent(ev) {
+    return picks.filter(p => p.event === ev).length;
+  }
+  function countByAthlete(a) {
+    return picks.filter(p => p.athlete === a).length;
+  }
+
+  function canAdd(a, ev) {
+    if (!events.includes(ev)) return false;
+    if (countByEvent(ev) >= 3) return false;
+    if (countByAthlete(a) >= 2) return false;
+    if (picks.some(p => p.athlete === a && p.event === ev)) return false;
+    return true;
+  }
+
+  function remove(a, ev) {
+    const idx = picks.findIndex(p => p.athlete === a && p.event === ev);
+    if (idx >= 0) picks.splice(idx, 1);
+  }
+
+  function isValid() {
+    // 種目ごとに 0〜3人はOK（空の種目があってもOKにする：大枠優先）
+    // ただし「どれか1種目は出す」くらいは必須
+    return picks.length > 0 && picks.every(p => events.includes(p.event));
+  }
+
+  function draw() {
+    const eventBlocks = events.map(ev => {
+      const pickedHere = picks.filter(p => p.event === ev);
+      const list = pickedHere.map(p => `
+        <div style="display:flex; justify-content:space-between; gap:8px; border-top:1px solid #eee; padding:6px 0;">
+          <div>${p.athlete.name}（${p.athlete.grade}年/総合${p.athlete.overall}）</div>
+          <button data-del="1" data-aid="${p.athlete.id}" data-ev="${ev}" style="background:#a00;">外す</button>
+        </div>
+      `).join("") || `<div style="color:#777;">未選出</div>`;
+
+      return `
+        <div style="border:1px solid #eee; border-radius:10px; padding:10px; margin-top:10px;">
+          <div style="font-weight:800;">${labelEvent(ev)}（${countByEvent(ev)}/3）</div>
+          <div style="margin-top:6px;">${list}</div>
+        </div>
+      `;
+    }).join("");
+
+    // 選手一覧（追加用）
+    const athleteRows = state.athletes.map(a => {
+      const used = countByAthlete(a);
+      const addButtons = events.map(ev => {
+        const disabled = canAdd(a, ev) ? "" : "disabled";
+        return `<button data-add="1" data-aid="${a.id}" data-ev="${ev}" ${disabled} style="margin:2px;">${labelEvent(ev)}</button>`;
+      }).join("");
+
+      return `
+        <div style="padding:8px;border-top:1px solid #eee;">
+          <div style="font-weight:700;">${athleteLabel(a)} / 出場数 ${used}/2</div>
+          <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px;">
+            ${addButtons}
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    app.innerHTML = `
+      <div class="card">
+        <h2>出場選出：総体</h2>
+        <p style="color:#555;">各種目3人まで／1人2種目まで（手動で追加・解除）</p>
+
+        <h3 style="margin-top:10px;">種目ごとの選出</h3>
+        ${eventBlocks}
+
+        <h3 style="margin-top:14px;">選手一覧（追加）</h3>
+        <div style="max-height:45vh; overflow:auto; border:1px solid #eee; border-radius:8px;">
+          ${athleteRows}
+        </div>
+
+        <div class="row" style="margin-top:12px;">
+          ${btn("確定", "ok")}
+          ${smallBtn("戻る", "cancel")}
+        </div>
+
+        <p style="margin-top:8px;color:${isValid() ? "#0a0" : "#b00"};">
+          ${isValid() ? "OK：確定できます" : "最低1枠は選出してください"}
+        </p>
+      </div>
+    `;
+
+    // 追加
+    app.querySelectorAll("button[data-add]").forEach(b => {
+      b.onclick = () => {
+        const aid = b.getAttribute("data-aid");
+        const ev = b.getAttribute("data-ev");
+        const a = state.athletes.find(x => x.id === aid);
+        if (!a) return;
+        if (!canAdd(a, ev)) return;
+        picks.push({ athlete: a, event: ev });
+        draw();
+      };
+    });
+
+    // 削除
+    app.querySelectorAll("button[data-del]").forEach(b => {
+      b.onclick = () => {
+        const aid = b.getAttribute("data-aid");
+        const ev = b.getAttribute("data-ev");
+        const a = state.athletes.find(x => x.id === aid);
+        if (!a) return;
+        remove(a, ev);
+        draw();
+      };
+    });
+
+    document.querySelector("#ok").onclick = () => {
+      if (!isValid()) return;
+      onConfirm(picks.slice());
+    };
+    document.querySelector("#cancel").onclick = () => onCancel();
+  }
+
+  draw();
+}
+
+// ======================================================
+// 駅伝：7区に7人（重複なし）
+// picks: [{leg, event, athlete} ...]（7つ）
+// ======================================================
+function renderEkidenPicker(app, state, { onCancel, onConfirm }) {
+  const sections = [
+    { leg: 1, event: "10000" },
+    { leg: 2, event: "3000" },
+    { leg: 3, event: "8000" },
+    { leg: 4, event: "8000" },
+    { leg: 5, event: "3000" },
+    { leg: 6, event: "5000" },
+    { leg: 7, event: "5000" },
+  ];
+
+  const picks = new Map(); // leg -> athleteId
+
+  function usedSet() {
+    return new Set(Array.from(picks.values()));
+  }
+  function isValid() {
+    return sections.every(s => picks.get(s.leg)) && usedSet().size === 7;
+  }
+
+  function draw() {
+    const used = usedSet();
+
+    const secBlocks = sections.map(s => {
+      const cur = picks.get(s.leg) ?? "";
+      const options = state.athletes.map(a => {
+        const disabled = (used.has(a.id) && a.id !== cur) ? "disabled" : "";
+        return `<option value="${a.id}" ${a.id === cur ? "selected" : ""} ${disabled}>${athleteLabel(a)}</option>`;
+      }).join("");
+
+      return `
+        <div style="border:1px solid #eee;border-radius:10px;padding:10px;margin-top:10px;">
+          <div style="font-weight:800;">${s.leg}区（${s.event}m）</div>
+          <select data-leg="${s.leg}" style="width:100%; padding:10px; margin-top:6px;">
+            <option value="">未選択</option>
+            ${options}
+          </select>
+        </div>
+      `;
+    }).join("");
+
+    app.innerHTML = `
+      <div class="card">
+        <h2>出場選出：駅伝</h2>
+        <p style="color:#555;">1〜7区に選手を1人ずつ（重複なし）</p>
+        <div style="max-height:65vh; overflow:auto;">
+          ${secBlocks}
+        </div>
+        <div class="row" style="margin-top:12px;">
+          ${btn("確定", "ok")}
+          ${smallBtn("戻る", "cancel")}
+        </div>
+        <p style="margin-top:8px;color:${isValid() ? "#0a0" : "#b00"};">
+          ${isValid() ? "OK：確定できます" : "未選択の区間があるか、重複があります"}
+        </p>
+      </div>
+    `;
+
+    app.querySelectorAll("select[data-leg]").forEach(sel => {
+      sel.onchange = () => {
+        const leg = Number(sel.getAttribute("data-leg"));
+        const v = sel.value;
+        if (!v) picks.delete(leg);
+        else picks.set(leg, v);
+        draw();
+      };
+    });
+
+    document.querySelector("#ok").onclick = () => {
+      if (!isValid()) return;
+      const arr = sections.map(s => {
+        const aid = picks.get(s.leg);
+        const a = state.athletes.find(x => x.id === aid);
+        return { leg: s.leg, event: s.event, athlete: a };
+      });
+      onConfirm(arr);
+    };
+    document.querySelector("#cancel").onclick = () => onCancel();
+  }
+
+  draw();
+}
+
+function labelEvent(ev) {
+  if (ev === "800") return "800";
+  if (ev === "1500") return "1500";
+  if (ev === "3000sc") return "3000SC";
+  if (ev === "5000") return "5000";
+  if (ev === "5000w") return "5000W";
+  return ev;
+}
