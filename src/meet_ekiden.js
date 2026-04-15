@@ -1,43 +1,9 @@
 import { calcEventPower, calcTimeSecondsFromPower, formatTime } from "./rules.js";
 
-// 駅伝区間定義
-const SECTIONS = [
-  { leg: 1, event: "10000" },
-  { leg: 2, event: "3000" },
-  { leg: 3, event: "8000" },
-  { leg: 4, event: "8000" },
-  { leg: 5, event: "3000" },
-  { leg: 6, event: "5000" },
-  { leg: 7, event: "5000" },
-];
-
-// チーム編成（重複なし）：各区間の種目総合値が高い選手を順に選ぶ（簡略）
-function selectTeamAuto(athletes) {
-  const unused = new Set(athletes);
-  const team = [];
-
-  for (const sec of SECTIONS) {
-    let best = null;
-    let bestPower = -1;
-
-    for (const a of unused) {
-      const p = calcEventPower(a, sec.event);
-      if (p > bestPower) {
-        bestPower = p;
-        best = a;
-      }
-    }
-
-    team.push({ ...sec, athlete: best, power: bestPower });
-    unused.delete(best);
-  }
-
-  return team;
-}
-
-function runTeamTime(team) {
-  const legs = team.map(x => {
-    const t = calcTimeSecondsFromPower(x.event, x.power);
+function runTeamTime(teamPicks) {
+  const legs = teamPicks.map(x => {
+    const power = calcEventPower(x.athlete, x.event);
+    const t = calcTimeSecondsFromPower(x.event, power);
     return {
       leg: x.leg,
       event: x.event,
@@ -51,16 +17,20 @@ function runTeamTime(team) {
   return { legs, totalSec: total, totalText: formatTime(total, 1) };
 }
 
-export function runEkiden(state, stageKey) {
-  // stageKey: district/prefecture/region/national
+// playerPicks: [{leg,event,athlete}] 7つ
+export function runEkiden(state, stageKey, playerPicks) {
   const rivals = state.rivals?.[stageKey] ?? [];
 
-  const playerTeam = selectTeamAuto(state.athletes);
-  const player = runTeamTime(playerTeam);
+  const player = runTeamTime(playerPicks);
 
   const others = rivals.map(s => {
-    const team = selectTeamAuto(s.athletes);
-    const res = runTeamTime(team);
+    // 相手は簡略：先頭7人を各区間に割当（大枠優先）
+    const picks = playerPicks.map((p, i) => ({
+      leg: p.leg,
+      event: p.event,
+      athlete: s.athletes[i % s.athletes.length],
+    }));
+    const res = runTeamTime(picks);
     return { school: s.name, ...res };
   });
 
@@ -79,7 +49,6 @@ export function runEkiden(state, stageKey) {
     ranking: ranked,
   };
 
-  // 5位以内で勝ち上がり
   const my = ranked.find(x => x.isPlayer);
   result.myRank = my?.rank ?? 999;
   result.cleared = result.myRank <= 5;
