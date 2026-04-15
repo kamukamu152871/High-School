@@ -1,7 +1,6 @@
 import { EVENTS_MEET } from "./rules.js";
+import { recommendRecordPicks, recommendSoutaiPicks, recommendEkidenPicks } from "./recommend.js";
 
-// UIを描画して、確定したら onConfirm(picks) を呼ぶ
-// picksの形式は mode によって変える（後述）
 export function renderPicker(app, mode, state, context) {
   if (mode === "record") return renderRecordPicker(app, state, context);
   if (mode === "soutai") return renderSoutaiPicker(app, state, context);
@@ -9,27 +8,21 @@ export function renderPicker(app, mode, state, context) {
   throw new Error("unknown picker mode");
 }
 
-// --- 共通 ---
-function btn(html, id) {
-  return `<button id="${id}">${html}</button>`;
-}
-function smallBtn(html, id) {
-  return `<button id="${id}" style="background:#444;">${html}</button>`;
-}
-function athleteLabel(a) {
-  return `${a.grade}年 ${a.name}（${a.personality} / 総合${a.overall}）`;
-}
+function btn(html, id) { return `<button id="${id}">${html}</button>`; }
+function smallBtn(html, id) { return `<button id="${id}" style="background:#444;">${html}</button>`; }
+function athleteLabel(a) { return `${a.grade}年 ${a.name}（${a.personality} / 総合${a.overall}）`; }
 
-// ======================================================
-// 記録会：15人を 1500/3000/5000 に必ず1人1種目
-// picks: [{athlete, event} ...]（athleteはstate.athletesの参照）
-// ======================================================
+// ===== 記録会 =====
 function renderRecordPicker(app, state, { onCancel, onConfirm }) {
   const events = ["1500", "3000", "5000"];
   const picks = new Map(); // athlete.id -> event
 
+  function applyRecommended() {
+    const rec = recommendRecordPicks(state.athletes);
+    for (const r of rec) picks.set(r.athlete.id, r.event);
+  }
+
   function isValid() {
-    // 全員割当済み
     return state.athletes.every(a => picks.has(a.id));
   }
 
@@ -55,20 +48,27 @@ function renderRecordPicker(app, state, { onCancel, onConfirm }) {
       <div class="card">
         <h2>出場選出：記録会</h2>
         <p style="color:#555;">全選手を1種目に割り当ててください（1500/3000/5000）</p>
+
+        <div class="row" style="margin-top:8px;">
+          ${btn("おすすめ", "rec")}
+          ${smallBtn("全解除", "clear")}
+        </div>
+
         <div style="max-height:55vh; overflow:auto; border:1px solid #eee; border-radius:8px;">
           ${rows}
         </div>
+
         <div class="row" style="margin-top:12px;">
           ${btn("確定", "ok")}
           ${smallBtn("戻る", "cancel")}
         </div>
+
         <p style="margin-top:8px;color:${isValid() ? "#0a0" : "#b00"};">
           ${isValid() ? "OK：全員割り当て済み" : "未割り当ての選手がいます"}
         </p>
       </div>
     `;
 
-    // イベント
     app.querySelectorAll("input[type=radio]").forEach(r => {
       r.onchange = () => {
         const [_, id] = r.name.split("ev_");
@@ -76,6 +76,9 @@ function renderRecordPicker(app, state, { onCancel, onConfirm }) {
         draw();
       };
     });
+
+    document.querySelector("#rec").onclick = () => { applyRecommended(); draw(); };
+    document.querySelector("#clear").onclick = () => { picks.clear(); draw(); };
 
     document.querySelector("#ok").onclick = () => {
       if (!isValid()) return;
@@ -88,21 +91,14 @@ function renderRecordPicker(app, state, { onCancel, onConfirm }) {
   draw();
 }
 
-// ======================================================
-// 総体：各種目最大3人、1人最大2種目
-// picks: [{athlete, event} ...]
-// allowedEvents: 通過種目限定（県/地域/全国で使用）
-// ======================================================
+// ===== 総体 =====
 function renderSoutaiPicker(app, state, { allowedEvents = null, onCancel, onConfirm }) {
   const events = allowedEvents ?? EVENTS_MEET;
   const picks = []; // {athlete, event}
+  let listScrollTop = 0;
 
-  function countByEvent(ev) {
-    return picks.filter(p => p.event === ev).length;
-  }
-  function countByAthlete(a) {
-    return picks.filter(p => p.athlete === a).length;
-  }
+  function countByEvent(ev) { return picks.filter(p => p.event === ev).length; }
+  function countByAthlete(a) { return picks.filter(p => p.athlete === a).length; }
 
   function canAdd(a, ev) {
     if (!events.includes(ev)) return false;
@@ -111,16 +107,16 @@ function renderSoutaiPicker(app, state, { allowedEvents = null, onCancel, onConf
     if (picks.some(p => p.athlete === a && p.event === ev)) return false;
     return true;
   }
-
   function remove(a, ev) {
     const idx = picks.findIndex(p => p.athlete === a && p.event === ev);
     if (idx >= 0) picks.splice(idx, 1);
   }
+  function isValid() { return picks.length > 0 && picks.every(p => events.includes(p.event)); }
 
-  function isValid() {
-    // 種目ごとに 0〜3人はOK（空の種目があってもOKにする：大枠優先）
-    // ただし「どれか1種目は出す」くらいは必須
-    return picks.length > 0 && picks.every(p => events.includes(p.event));
+  function applyRecommended() {
+    picks.splice(0, picks.length);
+    const rec = recommendSoutaiPicks(state.athletes, events);
+    for (const r of rec) picks.push(r);
   }
 
   function draw() {
@@ -141,7 +137,6 @@ function renderSoutaiPicker(app, state, { allowedEvents = null, onCancel, onConf
       `;
     }).join("");
 
-    // 選手一覧（追加用）
     const athleteRows = state.athletes.map(a => {
       const used = countByAthlete(a);
       const addButtons = events.map(ev => {
@@ -162,13 +157,18 @@ function renderSoutaiPicker(app, state, { allowedEvents = null, onCancel, onConf
     app.innerHTML = `
       <div class="card">
         <h2>出場選出：総体</h2>
-        <p style="color:#555;">各種目3人まで／1人2種目まで（手動で追加・解除）</p>
+        <p style="color:#555;">各種目3人まで／1人2種目まで</p>
+
+        <div class="row" style="margin-top:8px;">
+          ${btn("おすすめ", "rec")}
+          ${smallBtn("全解除", "clear")}
+        </div>
 
         <h3 style="margin-top:10px;">種目ごとの選出</h3>
         ${eventBlocks}
 
         <h3 style="margin-top:14px;">選手一覧（追加）</h3>
-        <div style="max-height:45vh; overflow:auto; border:1px solid #eee; border-radius:8px;">
+        <div id="alist" style="max-height:45vh; overflow:auto; border:1px solid #eee; border-radius:8px;">
           ${athleteRows}
         </div>
 
@@ -183,9 +183,16 @@ function renderSoutaiPicker(app, state, { allowedEvents = null, onCancel, onConf
       </div>
     `;
 
-    // 追加
+    // スクロール復元
+    const alist = document.querySelector("#alist");
+    if (alist) alist.scrollTop = listScrollTop;
+
+    // 追加（押す前にスクロール位置保存）
     app.querySelectorAll("button[data-add]").forEach(b => {
       b.onclick = () => {
+        const al = document.querySelector("#alist");
+        listScrollTop = al ? al.scrollTop : 0;
+
         const aid = b.getAttribute("data-aid");
         const ev = b.getAttribute("data-ev");
         const a = state.athletes.find(x => x.id === aid);
@@ -199,6 +206,9 @@ function renderSoutaiPicker(app, state, { allowedEvents = null, onCancel, onConf
     // 削除
     app.querySelectorAll("button[data-del]").forEach(b => {
       b.onclick = () => {
+        const al = document.querySelector("#alist");
+        listScrollTop = al ? al.scrollTop : 0;
+
         const aid = b.getAttribute("data-aid");
         const ev = b.getAttribute("data-ev");
         const a = state.athletes.find(x => x.id === aid);
@@ -208,20 +218,28 @@ function renderSoutaiPicker(app, state, { allowedEvents = null, onCancel, onConf
       };
     });
 
-    document.querySelector("#ok").onclick = () => {
-      if (!isValid()) return;
-      onConfirm(picks.slice());
+    document.querySelector("#rec").onclick = () => {
+      const al = document.querySelector("#alist");
+      listScrollTop = al ? al.scrollTop : 0;
+      applyRecommended();
+      draw();
     };
+
+    document.querySelector("#clear").onclick = () => {
+      const al = document.querySelector("#alist");
+      listScrollTop = al ? al.scrollTop : 0;
+      picks.splice(0, picks.length);
+      draw();
+    };
+
+    document.querySelector("#ok").onclick = () => { if (isValid()) onConfirm(picks.slice()); };
     document.querySelector("#cancel").onclick = () => onCancel();
   }
 
   draw();
 }
 
-// ======================================================
-// 駅伝：7区に7人（重複なし）
-// picks: [{leg, event, athlete} ...]（7つ）
-// ======================================================
+// ===== 駅伝 =====
 function renderEkidenPicker(app, state, { onCancel, onConfirm }) {
   const sections = [
     { leg: 1, event: "10000" },
@@ -234,6 +252,11 @@ function renderEkidenPicker(app, state, { onCancel, onConfirm }) {
   ];
 
   const picks = new Map(); // leg -> athleteId
+
+  function applyRecommended() {
+    const rec = recommendEkidenPicks(state.athletes);
+    for (const r of rec) picks.set(r.leg, r.athlete.id);
+  }
 
   function usedSet() {
     return new Set(Array.from(picks.values()));
@@ -267,13 +290,21 @@ function renderEkidenPicker(app, state, { onCancel, onConfirm }) {
       <div class="card">
         <h2>出場選出：駅伝</h2>
         <p style="color:#555;">1〜7区に選手を1人ずつ（重複なし）</p>
+
+        <div class="row" style="margin-top:8px;">
+          ${btn("おすすめ", "rec")}
+          ${smallBtn("全解除", "clear")}
+        </div>
+
         <div style="max-height:65vh; overflow:auto;">
           ${secBlocks}
         </div>
+
         <div class="row" style="margin-top:12px;">
           ${btn("確定", "ok")}
           ${smallBtn("戻る", "cancel")}
         </div>
+
         <p style="margin-top:8px;color:${isValid() ? "#0a0" : "#b00"};">
           ${isValid() ? "OK：確定できます" : "未選択の区間があるか、重複があります"}
         </p>
@@ -289,6 +320,9 @@ function renderEkidenPicker(app, state, { onCancel, onConfirm }) {
         draw();
       };
     });
+
+    document.querySelector("#rec").onclick = () => { applyRecommended(); draw(); };
+    document.querySelector("#clear").onclick = () => { picks.clear(); draw(); };
 
     document.querySelector("#ok").onclick = () => {
       if (!isValid()) return;
