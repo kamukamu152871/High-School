@@ -52,7 +52,7 @@ export function applyTraining(state, trainingId) {
   if (!t) return;
 
   for (const a of state.athletes) {
-    const base = randInt(1, 3);
+    const base = randInt(1, 2);
     const bonus = personalityBonus(a.personality, t.stat);
     a.abilities[t.stat] = clamp1to100(a.abilities[t.stat] + base + bonus);
     recalcOverall(a);
