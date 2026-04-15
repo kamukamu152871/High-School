@@ -1,16 +1,24 @@
 import { createNewGameState, saveGame, loadGame, clearSave } from "./state.js";
 import { TRAININGS, applyTraining } from "./rules.js";
 import { runRecordMeet } from "./meet_record.js";
+import { runSoutai } from "./meet_soutai.js";
 
 const app = document.querySelector("#app");
 
-function isRecordMeetWeek(state) {
-  // 記録会：4月4週後、9月3週後、3月3週後（「後」= その週の練習→大会）
-  return (
-    (state.month === 4 && state.week === 4) ||
-    (state.month === 9 && state.week === 3) ||
-    (state.month === 3 && state.week === 3)
-  );
+// --- スケジュール判定（「その週の練習後に大会」） ---
+function getMeetOfWeek(state) {
+  // 記録会：4月4週後、9月3週後、3月3週後
+  if (state.month === 4 && state.week === 4) return { type: "record" };
+  if (state.month === 9 && state.week === 3) return { type: "record" };
+  if (state.month === 3 && state.week === 3) return { type: "record" };
+
+  // 総体：5月1週後 地区、5月4週後 県、6月3週後 地域、7月4週後 全国
+  if (state.month === 5 && state.week === 1) return { type: "soutai", stage: "district" };
+  if (state.month === 5 && state.week === 4) return { type: "soutai", stage: "prefecture" };
+  if (state.month === 6 && state.week === 3) return { type: "soutai", stage: "region" };
+  if (state.month === 7 && state.week === 4) return { type: "soutai", stage: "national" };
+
+  return null;
 }
 
 function advanceWeek(state) {
@@ -21,6 +29,8 @@ function advanceWeek(state) {
     if (state.month > 12) state.month = 1;
   }
 }
+
+// --- 画面 ---
 
 function renderTitle() {
   const hasSave = !!loadGame();
@@ -57,8 +67,12 @@ function renderTitle() {
 }
 
 function renderHome(state) {
-  const meetText = isRecordMeetWeek(state)
-    ? "この週は【記録会】があります（練習後に実行）"
+  const meet = getMeetOfWeek(state);
+
+  const meetText = meet
+    ? (meet.type === "record"
+      ? "この週は【記録会】があります（練習後に実行）"
+      : `この週は【総体】があります：${stageTitle(meet.stage)}（練習後に実行）`)
     : "この週は大会なし";
 
   app.innerHTML = `
@@ -85,23 +99,36 @@ function renderHome(state) {
   document.querySelector("#athletes").onclick = () => renderAthletes(state);
 
   document.querySelector("#next").onclick = () => {
-    // 大会週なら練習後に大会処理
-    if (isRecordMeetWeek(state)) {
+    const meet = getMeetOfWeek(state);
+
+    // 大会週なら練習後に大会処理 → 結果画面へ
+    if (meet?.type === "record") {
       const result = runRecordMeet(state);
       saveGame(state);
-      renderMeetResult(state, result);
+      renderRecordResult(state, result);
       return;
     }
 
-    // 大会なし→そのまま次週へ
+    if (meet?.type === "soutai") {
+      const result = runSoutai(state, meet.stage);
+      saveGame(state);
+      renderSoutaiResult(state, result);
+      return;
+    }
+
+    // 大会なし：そのまま次へ
     advanceWeek(state);
-    state.trainingDoneThisWeek = false;
-    state.lastTraining = null;
+    resetWeekFlags(state);
     saveGame(state);
     renderHome(state);
   };
 
   document.querySelector("#back").onclick = () => renderTitle();
+}
+
+function resetWeekFlags(state) {
+  state.trainingDoneThisWeek = false;
+  state.lastTraining = null;
 }
 
 function renderTraining(state) {
@@ -176,8 +203,8 @@ function renderAthletes(state) {
   document.querySelector("#home").onclick = () => renderHome(state);
 }
 
-function renderMeetResult(state, result) {
-  // 自校だけ表示（種目ごと）
+// --- 記録会結果 ---
+function renderRecordResult(state, result) {
   const sections = ["1500", "3000", "5000"].map(ev => {
     const rows = result.playerOnly[ev].map(r => `
       <tr>
@@ -213,22 +240,101 @@ function renderMeetResult(state, result) {
         <button id="nextWeek">次の週へ進む</button>
         <button class="secondary" id="home">ホームへ</button>
       </div>
+    </div>
+  `;
+
+  document.querySelector("#nextWeek").onclick = () => {
+    advanceWeek(state);
+    resetWeekFlags(state);
+    saveGame(state);
+    renderHome(state);
+  };
+  document.querySelector("#home").onclick = () => renderHome(state);
+}
+
+// --- 総体結果 ---
+function renderSoutaiResult(state, result) {
+  // 「各種目の上位だけ」を表示（全部出すと長いので、まずは決勝 or overall の上位10だけ）
+  const evOrder = ["800", "1500", "3000sc", "5000", "5000w"];
+
+  const sections = evOrder.map(ev => {
+    const er = result.events[ev];
+
+    // 表示対象
+    let list = [];
+    if (er.type === "withFinal") list = er.final;
+    else list = er.overall;
+
+    const top = list.slice(0, 10).map((x, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${x.school}</td>
+        <td>${x.isPlayer ? "自校" : ""}</td>
+        <td>${x.athlete.name}</td>
+        <td>${x.timeText}</td>
+      </tr>
+    `).join("");
+
+    return `
+      <h3 style="margin-top:14px;">${eventLabel(ev)}</h3>
+      <div style="overflow:auto;">
+        <table style="width:100%; border-collapse:collapse; min-width:560px;">
+          <thead>
+            <tr>
+              <th>順位</th><th>学校</th><th></th><th>選手</th><th>タイム</th>
+            </tr>
+          </thead>
+          <tbody>${top}</tbody>
+        </table>
+      </div>
+      <p style="color:#777;margin:6px 0 0 0;">※上位10人のみ表示</p>
+    `;
+  }).join("");
+
+  const passText = result.cleared
+    ? `通過種目：${result.passedEvents.map(eventLabel).join(" / ")}`
+    : "通過種目なし";
+
+  app.innerHTML = `
+    <div class="card">
+      <h2>${result.title} 結果</h2>
+      <p style="color:#555;">${result.when}</p>
+      <p style="color:#555;">${passText}</p>
+      ${sections}
+      <div class="row" style="margin-top:14px;">
+        <button id="nextWeek">次の週へ進む</button>
+        <button class="secondary" id="home">ホームへ</button>
+      </div>
       <p style="margin-top:10px;color:#777;">
-        ※次の週へ進むと「今週の練習」はリセットされます。
+        ※勝ち上がり判定は簡略版です（大枠完成後に厳密化します）。
       </p>
     </div>
   `;
 
   document.querySelector("#nextWeek").onclick = () => {
-    // 大会処理を終えた週なので、ここで週を進める
     advanceWeek(state);
-    state.trainingDoneThisWeek = false;
-    state.lastTraining = null;
+    resetWeekFlags(state);
     saveGame(state);
     renderHome(state);
   };
-
   document.querySelector("#home").onclick = () => renderHome(state);
+}
+
+function stageTitle(key) {
+  if (key === "district") return "地区総体";
+  if (key === "prefecture") return "県総体";
+  if (key === "region") return "地域総体";
+  if (key === "national") return "全国総体";
+  return "総体";
+}
+
+function eventLabel(ev) {
+  if (ev === "800") return "800m";
+  if (ev === "1500") return "1500m";
+  if (ev === "3000sc") return "3000mSC";
+  if (ev === "5000") return "5000m";
+  if (ev === "5000w") return "5000mW";
+  return ev;
 }
 
 renderTitle();
