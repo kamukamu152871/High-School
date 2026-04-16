@@ -85,7 +85,6 @@ function buildSoutaiRivalsWithCarry(state, stageKey) {
   const carry = (state.carry.soutai.next ?? []).filter(x => x.toStage === stageKey);
   if (carry.length === 0) return base;
 
-  // carry選手は「個人で混ざる」仕様なので混成校として扱う
   const mixed = {
     name: "持ち越し選手枠",
     facilityLevel: 1,
@@ -94,18 +93,6 @@ function buildSoutaiRivalsWithCarry(state, stageKey) {
   };
 
   return base.concat([mixed]);
-}
-
-function buildPlayerFixedSoutaiPicksFromCarry(state, stageKey) {
-  // stageKey（prefecture/region/national）に対して、
-  // carry.soutai.next の中から「toStage一致 & isPlayer=true」だけを使って確定枠を作る
-  ensureCarry(state);
-
-  const src = (state.carry.soutai.next ?? [])
-    .filter(x => x.toStage === stageKey && x.isPlayer);
-
-  // UI/meetは [{athlete,event}] の形を期待する
-  return src.map(x => ({ athlete: x.athlete, event: x.event }));
 }
 
 // 駅伝：top5Teams の team（学校オブジェクト）を追加（重複除外）
@@ -127,6 +114,14 @@ function buildEkidenRivalsWithCarry(state, stageKey) {
   return base.concat(add);
 }
 
+// 県以降：前大会上位枠（自校分）を固定化して確認画面に出すための picks を作る
+function buildPlayerFixedSoutaiPicksFromCarry(state, stageKey) {
+  ensureCarry(state);
+  const src = (state.carry.soutai.next ?? [])
+    .filter(x => x.toStage === stageKey && x.isPlayer);
+  return src.map(x => ({ athlete: x.athlete, event: x.event }));
+}
+
 function goNextWeek(state) {
   if (isYearUpdateWeek(state)) runYearUpdate(state);
   advanceWeek(state);
@@ -142,11 +137,18 @@ function renderTitle() {
   app.innerHTML = `
     <div class="card">
       <h2>タイトル</h2>
-      <div class="row">
+
+      <label style="display:block; margin-top:10px;">
+        学校名：
+        <input id="teamNameInput" type="text" value="自校" style="width:100%; padding:10px; margin-top:6px;" />
+      </label>
+
+      <div class="row" style="margin-top:12px;">
         <button id="new">ゲームスタート</button>
         <button id="cont" ${hasSave ? "" : "disabled"}>つづきから</button>
         <button class="secondary" id="reset" ${hasSave ? "" : "disabled"}>セーブ削除</button>
       </div>
+
       <p style="margin-top:12px;color:#555;">端末内（ブラウザ）に自動でセーブされます。</p>
       <p style="margin-top:8px;color:#b00;">※大きく仕様変更したので、最初は「セーブ削除」を推奨します。</p>
     </div>
@@ -154,6 +156,10 @@ function renderTitle() {
 
   document.querySelector("#new").onclick = () => {
     const state = createNewGameState();
+
+    const name = (document.querySelector("#teamNameInput")?.value ?? "").trim();
+    state.teamName = name || "自校";
+
     ensureRivals(state);
     ensureQualify(state);
     ensureFacilities(state);
@@ -200,17 +206,20 @@ function renderHome(state) {
   app.innerHTML = `
     <div class="card">
       <h2>ホーム</h2>
+      <p>学校：${state.teamName}</p>
       <p>年：${state.year} / ${state.month}月 ${state.week}週</p>
       <p style="color:#555;">${meetText}</p>
       ${yearText ? `<p style="color:#b00;">${yearText}</p>` : ""}
       <p style="color:#555;">今週の練習：${state.lastTraining?.name ?? "未実施"}</p>
 
-      <h3 style="margin-top:14px;">練習（タップで実行→大会があれば選出→次週へ）</h3>
+      <h3 style="margin-top:14px;">練習（タップで実行→大会があれば選出→実行）</h3>
       <div class="row">${trainingButtons}</div>
 
       <div class="row" style="margin-top:12px;">
         <button id="athletes">選手</button>
         <button id="facilities">設備</button>
+        <button id="rename">学校名変更</button>
+        <button id="help">ヘルプ</button>
         <button class="secondary" id="back">タイトルへ</button>
       </div>
     </div>
@@ -218,6 +227,8 @@ function renderHome(state) {
 
   document.querySelector("#athletes").onclick = () => renderAthletes(state);
   document.querySelector("#facilities").onclick = () => renderFacilities(state);
+  document.querySelector("#rename").onclick = () => renderRenameTeam(state);
+  document.querySelector("#help").onclick = () => renderHelp(state);
   document.querySelector("#back").onclick = () => renderTitle();
 
   app.querySelectorAll("button[data-tr]").forEach(b => {
@@ -254,46 +265,40 @@ function renderHome(state) {
         });
         return;
       }
-if (meet.type === "soutai") {
-  // carry混ぜ込み（次ステージ宛の上位選手を混成校として追加）
-  const original = state.rivals?.[meet.stage];
-  state.rivals[meet.stage] = buildSoutaiRivalsWithCarry(state, meet.stage);
 
-  const readOnly = meet.stage !== "district";
+      if (meet.type === "soutai") {
+        const original = state.rivals?.[meet.stage];
+        state.rivals[meet.stage] = buildSoutaiRivalsWithCarry(state, meet.stage);
 
-  // ★県以降：前大会上位枠（自校分）を固定化して確認画面に表示
-  const fixedPicks = readOnly ? buildPlayerFixedSoutaiPicksFromCarry(state, meet.stage) : null;
+        const readOnly = meet.stage !== "district";
+        const fixedPicks = readOnly ? buildPlayerFixedSoutaiPicksFromCarry(state, meet.stage) : null;
 
-  renderPicker(app, "soutai", state, {
-    allowedEvents: null,
-    allowedPairs: null,
-    readOnly,
-    fixedPicks, // ★追加
-    onCancel: () => {
-      state.rivals[meet.stage] = original;
-      renderHome(state);
-    },
-    onConfirm: (picks) => {
-      // districtは手動選出したpicks
-      // prefecture/region/nationalは fixedPicks をそのまま使う
-      const submit = readOnly ? (fixedPicks ?? []) : picks;
+        renderPicker(app, "soutai", state, {
+          allowedEvents: null,
+          allowedPairs: null,
+          readOnly,
+          fixedPicks,
+          onCancel: () => {
+            state.rivals[meet.stage] = original;
+            renderHome(state);
+          },
+          onConfirm: (picks) => {
+            const submit = readOnly ? (fixedPicks ?? []) : picks;
+            const result = runSoutai(state, meet.stage, submit, null);
 
-      const result = runSoutai(state, meet.stage, submit, null);
+            // 次大会に混ぜる“上位選手（全校分）”を保存
+            state.carry.soutai.next = result.carryCandidates ?? [];
 
-      // 次大会に混ぜる“上位選手”を保存（全校分）
-      state.carry.soutai.next = result.carryCandidates ?? [];
+            state.rivals[meet.stage] = original;
 
-      state.rivals[meet.stage] = original;
-
-      saveGame(state);
-      renderSoutaiResult(state, result);
-    }
-  });
-  return;
-}
+            saveGame(state);
+            renderSoutaiResult(state, result);
+          }
+        });
+        return;
+      }
 
       if (meet.type === "ekiden") {
-        // ★carry混ぜ込み（次ステージ宛の上位5校を追加）
         const original = state.rivals?.[meet.stage];
         state.rivals[meet.stage] = buildEkidenRivalsWithCarry(state, meet.stage);
 
@@ -305,7 +310,7 @@ if (meet.type === "soutai") {
           onConfirm: (picks) => {
             const result = runEkiden(state, meet.stage, picks);
 
-            // ★新仕様：次大会に混ぜる“上位5校（学校オブジェクト）”を保存
+            // 次大会に混ぜる“上位5校（学校オブジェクト）”を保存
             state.carry.ekiden.next = result.top5Teams ?? [];
 
             state.rivals[meet.stage] = original;
@@ -318,6 +323,73 @@ if (meet.type === "soutai") {
       }
     };
   });
+}
+
+function renderRenameTeam(state) {
+  app.innerHTML = `
+    <div class="card">
+      <h2>学校名変更</h2>
+      <p style="color:#555;">現在：${state.teamName}</p>
+
+      <label style="display:block; margin-top:12px;">
+        新しい学校名：
+        <input id="newTeamName" type="text" value="${state.teamName}" style="width:100%; padding:10px; margin-top:6px;" />
+      </label>
+
+      <div class="row" style="margin-top:12px;">
+        <button id="ok">保存</button>
+        <button class="secondary" id="cancel">戻る</button>
+      </div>
+    </div>
+  `;
+
+  document.querySelector("#ok").onclick = () => {
+    const v = (document.querySelector("#newTeamName")?.value ?? "").trim();
+    state.teamName = v || "自校";
+    saveGame(state);
+    renderHome(state);
+  };
+  document.querySelector("#cancel").onclick = () => renderHome(state);
+}
+
+function renderHelp(state) {
+  app.innerHTML = `
+    <div class="card">
+      <h2>ヘルプ</h2>
+
+      <h3 style="margin-top:12px;">基本の流れ</h3>
+      <ul>
+        <li>ホームで練習を選ぶ → 週が進みます。</li>
+        <li>大会がある週は、練習後に出場確認/選出して大会を実行します。</li>
+        <li>結果を見たら「OK（次の週へ）」で進みます。</li>
+      </ul>
+
+      <h3 style="margin-top:12px;">練習と設備</h3>
+      <ul>
+        <li>練習すると能力が上がります（設備Lvが高いほど上昇が大きい）。</li>
+        <li>総体で種目優勝すると、対応する設備Lvが上がります。</li>
+        <li>能力に0.5が入る場合がありますが、タイム計算は切り捨てで計算���れます。</li>
+      </ul>
+
+      <h3 style="margin-top:12px;">大会について</h3>
+      <ul>
+        <li>総体：800 / 1500 / 3000SC / 5000 / 5000W</li>
+        <li>駅伝：7区間（10000/3000/8000/8000/3000/5000/5000）</li>
+        <li>県以降の��体は「前大会の上位枠」確認のみで進みます。</li>
+      </ul>
+
+      <h3 style="margin-top:12px;">相手校（群とレベル）</h3>
+      <ul>
+        <li>相手校は「群（district/prefecture/region/national）」で大会参加が決まります。</li>
+        <li>強さは「level(1〜4)」で決まります（学校ごとに設定）。</li>
+      </ul>
+
+      <div class="row" style="margin-top:14px;">
+        <button class="secondary" id="back">戻る</button>
+      </div>
+    </div>
+  `;
+  document.querySelector("#back").onclick = () => renderHome(state);
 }
 
 function renderFacilities(state) {
@@ -384,40 +456,7 @@ function renderAthletes(state) {
   document.querySelector("#home").onclick = () => renderHome(state);
 }
 
-// --- 設備アップ：総体の「優勝」で段階的に上げる ---
-function upgradeFacilityBySoutaiWinners(state, result) {
-  const targetLv =
-    result.stage === "district" ? 2 :
-    result.stage === "prefecture" ? 3 :
-    result.stage === "region" ? 4 : null;
-
-  if (!targetLv) return;
-
-  ensureFacilities(state);
-
-  const map = {
-    "800": "nagashi",
-    "1500": "tt",
-    "3000sc": "circuit",
-    "5000": "jog",
-    "5000w": "interval",
-  };
-
-  for (const [ev, facilityKey] of Object.entries(map)) {
-    const er = result.events?.[ev];
-    if (!er) continue;
-
-    const list = er.type === "withFinal" ? er.final : er.overall;
-    if (!list || list.length === 0) continue;
-
-    const winner = list[0];
-    if (winner.isPlayer) {
-      state.facilities[facilityKey] = Math.max(state.facilities[facilityKey], targetLv);
-    }
-  }
-}
-
-// --- 結果画面 ---
+// --- 結果画面（既存仕様） ---
 function renderRecordResult(state, result) {
   const sections = ["1500", "3000", "5000"].map(ev => {
     const rows = result.playerOnly[ev].map(r => `
@@ -581,12 +620,44 @@ function renderEkidenResult(state, result) {
   document.querySelector("#ok").onclick = () => goNextWeek(state);
 }
 
+// --- 設備アップ：総体の「優勝」で段階的に上げる ---
+function upgradeFacilityBySoutaiWinners(state, result) {
+  const targetLv =
+    result.stage === "district" ? 2 :
+    result.stage === "prefecture" ? 3 :
+    result.stage === "region" ? 4 : null;
+
+  if (!targetLv) return;
+
+  ensureFacilities(state);
+
+  const map = {
+    "800": "nagashi",
+    "1500": "tt",
+    "3000sc": "circuit",
+    "5000": "jog",
+    "5000w": "interval",
+  };
+
+  for (const [ev, facilityKey] of Object.entries(map)) {
+    const er = result.events?.[ev];
+    if (!er) continue;
+
+    const list = er.type === "withFinal" ? er.final : er.overall;
+    if (!list || list.length === 0) continue;
+
+    const winner = list[0];
+    if (winner.isPlayer) {
+      state.facilities[facilityKey] = Math.max(state.facilities[facilityKey], targetLv);
+    }
+  }
+}
+
 // --- 年度更新 ---
 function runYearUpdate(state) {
   applyYearUpdateToState(state);
   rivalsYearUpdate(state);
 
-  // carryは翌年に持ち越さない（年度更新でリセット）
   ensureCarry(state);
   state.carry.soutai.next = [];
   state.carry.ekiden.next = [];
@@ -594,6 +665,7 @@ function runYearUpdate(state) {
   ensureFacilities(state);
 }
 
+// --- 表示ラベル ---
 function stageTitleSoutai(key) {
   if (key === "district") return "地区総体";
   if (key === "prefecture") return "県総体";
