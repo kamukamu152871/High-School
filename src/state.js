@@ -24,7 +24,7 @@ function createPersonality() {
   return "てんさい";
 }
 
-// 学年別：45% / 50% / 5% の分布
+// 学年別：45% / 50% / 5% の分布（A案）
 function sampleByRanges(ranges) {
   const r = Math.random() * 100;
   if (r < 45) return randInt(ranges[0][0], ranges[0][1]);
@@ -33,7 +33,6 @@ function sampleByRanges(ranges) {
 }
 
 function rangesByGrade(grade) {
-  // A案
   if (grade === 1) return [[1, 20], [21, 40], [41, 50]];
   if (grade === 2) return [[11, 30], [31, 50], [51, 60]];
   return [[21, 40], [41, 60], [61, 70]]; // grade 3
@@ -100,10 +99,24 @@ export function createNewGameState() {
     lastTraining: null,
     lastMeetResult: null,
 
+    // 相手校（rivals.js が生成）
     rivals: null,
+
+    // 旧仕様互換：残してOK（当面 main.js が参照している）
     qualify: {
       soutai: { prefecturePairs: [], regionPairs: [], nationalPairs: [] },
       ekiden: { prefecture: false, region: false, national: false },
+    },
+
+    // ★新仕様：次大会に混ぜる枠（他校も含む）
+    carry: {
+      // 総体：次ステージへ混ぜる「選手（個人）」枠
+      // 例：{ fromStage:"district", toStage:"prefecture", event:"1500", athlete:{...}, schoolName:"○○高校" }
+      soutai: { next: [] },
+
+      // 駅伝：次ステージへ混ぜる「高校（学校）」枠
+      // 例：{ fromStage:"district", toStage:"prefecture", schoolName:"○○高校", teamSnapshot:{...} }
+      ekiden: { next: [] },
     },
   };
 }
@@ -128,6 +141,16 @@ export function loadGame() {
       ekiden: { prefecture: false, region: false, national: false },
     };
 
+    // ★新セーブ救済（carry）
+    state.carry ??= {
+      soutai: { next: [] },
+      ekiden: { next: [] },
+    };
+    state.carry.soutai ??= { next: [] };
+    state.carry.ekiden ??= { next: [] };
+    state.carry.soutai.next ??= [];
+    state.carry.ekiden.next ??= [];
+
     return state;
   } catch {
     return null;
@@ -137,37 +160,35 @@ export function loadGame() {
 export function clearSave() {
   localStorage.removeItem(SAVE_KEY);
 }
+
 // --- 追加export：年度更新を main.js から呼べるようにする ---
 export function createAthletePublic(grade, index) {
-  // 既存のcreateAthleteと同じ実装（内部関数があるのでそのまま呼べないため再定義）
-  const abilities = (function createAbilitiesByGradePublic(grade) {
-    const ranges = (function rangesByGradePublic(grade) {
-      if (grade === 1) return [[1, 20], [21, 40], [41, 50]];
-      if (grade === 2) return [[11, 30], [31, 50], [51, 60]];
-      return [[21, 40], [41, 60], [61, 70]];
-    })(grade);
-
-    const sampleByRangesPublic = (ranges) => {
-      const r = Math.random() * 100;
-      const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
-      if (r < 45) return randInt(ranges[0][0], ranges[0][1]);
-      if (r < 95) return randInt(ranges[1][0], ranges[1][1]);
-      return randInt(ranges[2][0], ranges[2][1]);
-    };
-
-    return {
-      sprint: sampleByRangesPublic(ranges),
-      speed: sampleByRangesPublic(ranges),
-      stamina: sampleByRangesPublic(ranges),
-      toughness: sampleByRangesPublic(ranges),
-      technique: sampleByRangesPublic(ranges),
-    };
+  // createAthleteと同じ分布で作る（内部関数の都合で再定義）
+  const ranges = (function rangesByGradePublic(grade) {
+    if (grade === 1) return [[1, 20], [21, 40], [41, 50]];
+    if (grade === 2) return [[11, 30], [31, 50], [51, 60]];
+    return [[21, 40], [41, 60], [61, 70]];
   })(grade);
 
-  // 名前・性格は既存分布と一致
-  const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
-  const choice = (arr) => arr[randInt(0, arr.length - 1)];
-  const name = `${choice(FAMILY_NAMES)} ${choice(GIVEN_NAMES)}`;
+  const sampleByRangesPublic = (ranges) => {
+    const r = Math.random() * 100;
+    const randInt2 = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+    if (r < 45) return randInt2(ranges[0][0], ranges[0][1]);
+    if (r < 95) return randInt2(ranges[1][0], ranges[1][1]);
+    return randInt2(ranges[2][0], ranges[2][1]);
+  };
+
+  const abilities = {
+    sprint: sampleByRangesPublic(ranges),
+    speed: sampleByRangesPublic(ranges),
+    stamina: sampleByRangesPublic(ranges),
+    toughness: sampleByRangesPublic(ranges),
+    technique: sampleByRangesPublic(ranges),
+  };
+
+  const randInt2 = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+  const choice2 = (arr) => arr[randInt2(0, arr.length - 1)];
+  const name = `${choice2(FAMILY_NAMES)} ${choice2(GIVEN_NAMES)}`;
 
   const personality = (() => {
     const r = Math.random() * 100;
@@ -180,7 +201,7 @@ export function createAthletePublic(grade, index) {
     return "てんさい";
   })();
 
-  const overall = Math.round(
+  const ov = Math.round(
     (abilities.sprint + abilities.speed + abilities.stamina + abilities.toughness + abilities.technique) / 5
   );
 
@@ -190,7 +211,7 @@ export function createAthletePublic(grade, index) {
     name,
     personality,
     abilities,
-    overall,
+    overall: ov,
   };
 }
 
