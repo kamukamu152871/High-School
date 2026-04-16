@@ -120,13 +120,63 @@ function run5000like(allEntries, event) {
   return { type: "noFinal", heats, overall };
 }
 
+function nextStageKey(stageKey) {
+  if (stageKey === "district") return "prefecture";
+  if (stageKey === "prefecture") return "region";
+  if (stageKey === "region") return "national";
+  return null;
+}
+
+function carryThreshold(stageKey) {
+  // 県総体：地区の上位7
+  // 地域総体：県の上位7
+  // 全国総体：地域の上位5
+  if (stageKey === "region") return 5;
+  if (stageKey === "district") return 7;
+  if (stageKey === "prefecture") return 7;
+  return null; // nationalは次なし
+}
+
+// 次大会に混ぜる「選手候補」を抽出（決勝あり: final、なし: overall）
+function extractCarryCandidates(stageKey, result) {
+  const toStage = nextStageKey(stageKey);
+  const th = carryThreshold(stageKey);
+  if (!toStage || !th) return [];
+
+  const picked = [];
+  for (const ev of EVENTS_MEET) {
+    const er = result.events?.[ev];
+    if (!er) continue;
+
+    const ranked = (er.type === "withFinal") ? er.final : er.overall;
+    const topN = ranked.slice(0, th);
+
+    for (const x of topN) {
+      // 次大会へ混ぜるために、最低限の情報をスナップショットしておく
+      picked.push({
+        fromStage: stageKey,
+        toStage,
+        event: ev,
+        schoolName: x.school,
+        isPlayer: !!x.isPlayer,
+        athlete: x.athlete, // いったん参照のまま（固定能力方針ならOK）
+        timeSec: x.timeSec,
+        timeText: x.timeText,
+        rank: ranked.indexOf(x) + 1,
+      });
+    }
+  }
+
+  return picked;
+}
+
 export function runSoutai(state, stageKey, playerPickedEntries, allowedEvents = null) {
   const rivals = (state.rivals?.[stageKey] ?? []).slice();
   shuffle(rivals);
 
   const playerEntriesAll = normalizePlayerEntries(state, playerPickedEntries);
 
-  // 通過種目限定がある場合はフィルタ（保険）
+  // allowedEvents がある場合はフィルタ（保険）
   const playerEntries = allowedEvents
     ? playerEntriesAll.filter(e => allowedEvents.includes(e.event))
     : playerEntriesAll;
@@ -148,9 +198,13 @@ export function runSoutai(state, stageKey, playerPickedEntries, allowedEvents = 
     title: stageTitle(stageKey),
     when: `${state.month}月${state.week}週`,
     events: {},
+    // 旧仕様互換（まだmainが参照している可能性があるので残す）
     qualifiedEvents: [],
-    qualifiedPairs: [], // [{athleteId,event}]
+    qualifiedPairs: [],
     threshold: stageKey === "region" ? 5 : 7,
+
+    // ★新仕様：次大会に混ぜる候補（全校分）
+    carryCandidates: [],
   };
 
   // 種目ごとに実施（allowedEvents がある場合はその種目だけ）
@@ -160,7 +214,7 @@ export function runSoutai(state, stageKey, playerPickedEntries, allowedEvents = 
   if (!allowedEvents || allowedEvents.includes("5000")) result.events["5000"] = run5000like(byEvent["5000"], "5000");
   if (!allowedEvents || allowedEvents.includes("5000w")) result.events["5000w"] = run5000like(byEvent["5000w"], "5000w");
 
-  // 通過判定（全国は通過不���）
+  // 旧：通過判定（残す。表示などで使っている可能性があるため）
   if (stageKey !== "national") {
     for (const ev of EVENTS_MEET) {
       if (allowedEvents && !allowedEvents.includes(ev)) continue;
@@ -174,7 +228,8 @@ export function runSoutai(state, stageKey, playerPickedEntries, allowedEvents = 
         const rank = i + 1;
         if (!x.isPlayer) continue;
         if (rank <= result.threshold) {
-          result.qualifiedPairs.push({ athleteId: x.athlete.id, event: ev });
+          // athlete.id が無い相手選手もいる可能性があるので optional chain
+          result.qualifiedPairs.push({ athleteId: x.athlete?.id, event: ev });
         }
       }
 
@@ -183,6 +238,9 @@ export function runSoutai(state, stageKey, playerPickedEntries, allowedEvents = 
       }
     }
   }
+
+  // ★新：次大会へ混ぜる候補を抽出
+  result.carryCandidates = extractCarryCandidates(stageKey, result);
 
   state.lastMeetResult = result;
   return result;
