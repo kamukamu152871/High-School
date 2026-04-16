@@ -4,6 +4,7 @@ import {
   loadGame,
   clearSave,
   applyYearUpdateToState,
+  createScoutFreshman,
 } from "./state.js";
 
 import { TRAININGS, applyTraining } from "./rules.js";
@@ -75,6 +76,14 @@ function ensureCarry(state) {
   state.carry.ekiden.next ??= [];
 }
 
+function ensureScout(state) {
+  state.scout ??= { pool: [], selected: [], max: 1, lastEkidenTier: "none" };
+  state.scout.pool ??= [];
+  state.scout.selected ??= [];
+  state.scout.max ??= 1;
+  state.scout.lastEkidenTier ??= "none";
+}
+
 // ---- carry を次大会の rivals に混ぜ込む ----
 function buildSoutaiRivalsWithCarry(state, stageKey) {
   ensureRivals(state);
@@ -139,7 +148,7 @@ function buildPlayerFixedSoutaiPicksFromCarry(state, stageKey) {
   return src.map(x => ({ athlete: x.athlete, event: x.event }));
 }
 
-// ★駅伝：出場条件チェック（地区以外は前大会5位以内が必要）
+// 駅伝：出場条件チェック（地区以外は前大会5位以内が必要）
 function canEnterEkiden(state, stageKey) {
   ensureQualify(state);
   if (stageKey === "district") return true;
@@ -162,9 +171,23 @@ function renderEkidenNotQualified(state, stageKey) {
   document.querySelector("#ok").onclick = () => goNextWeek(state);
 }
 
-// ★3月4週：設備を1つ選んでLv+1してから年度更新→次週へ
+// --- 駅伝成績 → スカウト可能人数 ---
+function computeScoutMaxByEkiden(state) {
+  // 「その年」の最終到達を state.scout.lastEkidenTier に保持している前提
+  // lastEkidenTier: "none" | "prefecture" | "region" | "national" | "national_win"
+  ensureScout(state);
+  const tier = state.scout.lastEkidenTier ?? "none";
+  if (tier === "national_win") return 5;
+  if (tier === "national") return 4;
+  if (tier === "region") return 3;
+  if (tier === "prefecture") return 2;
+  return 1;
+}
+
+// --- 3月4週：設備を1つ選んでLv+1 → スカウト → 年度更新 → 次週へ ---
 function renderFacilityUpgradeChoice(state) {
   ensureFacilities(state);
+  ensureScout(state);
 
   const items = [
     { key: "nagashi", label: "流し" },
@@ -186,7 +209,7 @@ function renderFacilityUpgradeChoice(state) {
       <h2>年度更新前：設備強化</h2>
       <p style="color:#555;">3月4週目は、設備を1つだけ強化できます（Lv+1）。</p>
       ${rows}
-      <p style="color:#b00; margin-top:10px;">※選んだら年度更新（引退/進級/新入生）が行われ、次の週へ進みます。</p>
+      <p style="color:#b00; margin-top:10px;">※このあと新入生スカウト→年度更新（引退/進級/新入生）→次週へ進みます。</p>
     </div>
   `;
 
@@ -194,19 +217,111 @@ function renderFacilityUpgradeChoice(state) {
     b.onclick = () => {
       const key = b.getAttribute("data-up");
       state.facilities[key] = Math.min(4, (state.facilities[key] ?? 1) + 1);
-
-      // 年度更新→次週へ
-      runYearUpdate(state);
-      advanceWeek(state);
-      state.lastTraining = null;
       saveGame(state);
-      renderHome(state);
+      renderScout(state);
     };
   });
 }
 
+function renderScout(state) {
+  ensureScout(state);
+
+  // max決定（その年の駅伝成績による）
+  state.scout.max = computeScoutMaxByEkiden(state);
+
+  // 10人生成（同一年度で何度も開いたときは再生成しない）
+  if (!state.scout.pool || state.scout.pool.length !== 10) {
+    state.scout.pool = Array.from({ length: 10 }, (_, i) => createScoutFreshman(i));
+    state.scout.selected = [];
+  }
+
+  const max = state.scout.max;
+
+  const rows = state.scout.pool.map((a, idx) => {
+    const ab = a.abilities;
+    return `
+      <div style="border-top:1px solid #eee; padding:10px 0;">
+        <label style="display:flex; gap:10px; align-items:flex-start;">
+          <input type="checkbox" data-scout="1" data-idx="${idx}" style="margin-top:5px;" />
+          <div style="flex:1;">
+            <div style="font-weight:800;">${a.name}（性格：${a.personality}）</div>
+            <div style="color:#555; margin-top:4px;">
+              SPRINT ${ab.sprint} / SPEED ${ab.speed} / STAMINA ${ab.stamina} / TOUGHNESS ${ab.toughness} / TECHNIQUE ${ab.technique}
+            </div>
+            <div style="color:#777; margin-top:2px;">総合 ${a.overall}</div>
+          </div>
+        </label>
+      </div>
+    `;
+  }).join("");
+
+  app.innerHTML = `
+    <div class="card">
+      <h2>新入生スカウト</h2>
+      <p style="color:#555;">
+        候補10人から <b>${max}人まで</b> 選べます（能力は21〜60の範囲）。
+      </p>
+
+      <div style="max-height:55vh; overflow:auto;">
+        ${rows}
+      </div>
+
+      <div class="row" style="margin-top:12px;">
+        <button id="ok">決定</button>
+        <button class="secondary" id="reroll">候補を作り直す</button>
+      </div>
+
+      <p id="count" style="margin-top:10px; color:#555;"></p>
+      <p style="color:#b00; margin-top:6px;">※決定すると年度更新が行われ、次の週へ進みます。</p>
+    </div>
+  `;
+
+  const updateCount = () => {
+    const selectedIdx = Array.from(app.querySelectorAll("input[data-scout]"))
+      .filter(x => x.checked)
+      .map(x => Number(x.getAttribute("data-idx")));
+
+    const over = selectedIdx.length > max;
+    document.querySelector("#count").textContent =
+      `選択数：${selectedIdx.length}/${max}` + (over ? "（選びすぎ）" : "");
+    document.querySelector("#count").style.color = over ? "#b00" : "#555";
+  };
+
+  app.querySelectorAll("input[data-scout]").forEach(cb => {
+    cb.onchange = () => {
+      updateCount();
+    };
+  });
+  updateCount();
+
+  document.querySelector("#reroll").onclick = () => {
+    // 生成し直し
+    state.scout.pool = Array.from({ length: 10 }, (_, i) => createScoutFreshman(i));
+    state.scout.selected = [];
+    saveGame(state);
+    renderScout(state);
+  };
+
+  document.querySelector("#ok").onclick = () => {
+    const selectedIdx = Array.from(app.querySelectorAll("input[data-scout]"))
+      .filter(x => x.checked)
+      .map(x => Number(x.getAttribute("data-idx")));
+
+    if (selectedIdx.length > max) return;
+
+    state.scout.selected = selectedIdx.map(i => state.scout.pool[i]);
+    saveGame(state);
+
+    // 年度更新→次週へ
+    runYearUpdate(state);
+    advanceWeek(state);
+    state.lastTraining = null;
+    saveGame(state);
+    renderHome(state);
+  };
+}
+
 function goNextWeek(state) {
-  // ★3月4週は設備強化選択へ
   if (isYearUpdateWeek(state)) {
     renderFacilityUpgradeChoice(state);
     return;
@@ -251,6 +366,7 @@ function renderTitle() {
     ensureQualify(state);
     ensureFacilities(state);
     ensureCarry(state);
+    ensureScout(state);
     saveGame(state);
     renderHome(state);
   };
@@ -262,6 +378,7 @@ function renderTitle() {
       ensureQualify(state);
       ensureFacilities(state);
       ensureCarry(state);
+      ensureScout(state);
       saveGame(state);
       renderHome(state);
     }
@@ -285,7 +402,7 @@ function renderHome(state) {
     : "この週は大会なし";
 
   const yearText = isYearUpdateWeek(state)
-    ? "この週の最後に【年度更新（設備強化→引退/進級/新入生）】があります"
+    ? "この週の最後に【年度更新（設備強化→スカウト→引退/進級/新入生）】があります"
     : "";
 
   const trainingButtons = TRAININGS.map(t => `<button data-tr="${t.id}">${t.name}</button>`).join("");
@@ -326,6 +443,7 @@ function renderHome(state) {
       ensureQualify(state);
       ensureFacilities(state);
       ensureCarry(state);
+      ensureScout(state);
 
       // 相手校は固定能力なので実質noop
       rivalsWeeklyTraining(state);
@@ -386,7 +504,7 @@ function renderHome(state) {
       }
 
       if (meet.type === "ekiden") {
-        // ★出場条件チェック（地区以外）
+        // 出場条件チェック（地区以外）
         if (!canEnterEkiden(state, meet.stage)) {
           renderEkidenNotQualified(state, meet.stage);
           return;
@@ -403,11 +521,20 @@ function renderHome(state) {
           onConfirm: (picks) => {
             const result = runEkiden(state, meet.stage, picks);
 
-            // ★通過フラグ更新（次ステージの出場条件）
+            // 通過フラグ更新（次ステージの出場条件）
             ensureQualify(state);
             if (meet.stage === "district") state.qualify.ekiden.prefecture = !!result.cleared;
             if (meet.stage === "prefecture") state.qualify.ekiden.region = !!result.cleared;
             if (meet.stage === "region") state.qualify.ekiden.national = !!result.cleared;
+
+            // ★その年の駅伝成績（スカウト人数の段階）を更新
+            // 県以上に出場したら、その段階に到達した扱い
+            ensureScout(state);
+            if (meet.stage === "prefecture") state.scout.lastEkidenTier = "prefecture";
+            if (meet.stage === "region") state.scout.lastEkidenTier = "region";
+            if (meet.stage === "national") {
+              state.scout.lastEkidenTier = (result.myRank === 1) ? "national_win" : "national";
+            }
 
             // 次大会に混ぜる“上位5校（学校オブジェクト）”を保存
             state.carry.ekiden.next = result.top5Teams ?? [];
@@ -455,66 +582,7 @@ function renderHelp(state) {
   app.innerHTML = `
     <div class="card">
       <h2>ヘルプ</h2>
-
-      <h3 style="margin-top:12px;">基本の流れ</h3>
-      <ul>
-        <li>ホームで練習を選ぶ → 週が進みます。</li>
-        <li>大会がある週は、練習後に出場確認/選出して大会を実行します。</li>
-        <li>結果を見たら「OK（次の週へ）」で進みます。</li>
-      </ul>
-
-      <h3 style="margin-top:12px;">能力の種類</h3>
-      <ul>
-        <li>SPRINT：瞬発力</li>
-        <li>SPEED：スピード</li>
-        <li>STAMINA：スタミナ</li>
-        <li>TOUGHNESS：タフネス</li>
-        <li>TECHNIQUE：テクニック</li>
-      </ul>
-
-      <h3 style="margin-top:12px;">練習と伸びる能力</h3>
-      <ul>
-        <li>流し：主に <b>SPRINT</b> が伸びやすい練習です。</li>
-        <li>TT：主に <b>SPEED</b> が伸びやすい練習です。</li>
-        <li>ジョグ：主に <b>STAMINA</b> が伸びやすい練習です。</li>
-        <li>インターバル：主に <b>TOUGHNESS</b> が伸びやすい練習です。</li>
-        <li>サーキット：主に <b>TECHNIQUE</b> が伸びやすい練習です。</li>
-      </ul>
-
-      <h3 style="margin-top:12px;">性格補正（練習の伸び方）</h3>
-      <ul>
-        <li>選手の性格によって、特定の練習で能力が伸びやすくなります。</li>
-        <li>短気：<b>SPRINT</b> 系が伸びやすい傾向があります。</li>
-        <li>せっかち：<b>SPEED</b> 系が伸びやすい傾向があります。</li>
-        <li>おおらか：<b>STAMINA</b> 系が伸びやすい傾向があります。</li>
-        <li>がんこ：<b>TOUGHNESS</b> 系が伸びやすい傾向があります。</li>
-        <li>きよう：<b>TECHNIQUE</b> 系が伸びやすい傾向があります。</li>
-        <li>ふつう：全体的に安定して伸びやすい傾向があります。</li>
-        <li>てんさい：多方面で伸びやすく、化ける可能性があります。</li>
-      </ul>
-
-      <h3 style="margin-top:12px;">総体：種目ごとの重要能力（目安）</h3>
-      <ul>
-        <li>800m：主に <b>SPRINT</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
-        <li>1500m：主に <b>SPRINT</b> と <b>SPEED</b>、さらに <b>STAMINA</b> も影響します。</li>
-        <li>3000mSC：主に <b>SPEED</b>・<b>STAMINA</b> に加えて、<b>TECHNIQUE</b> の影響が出やすいです。</li>
-        <li>5000m：主に <b>SPEED</b> と <b>STAMINA</b>、さらに <b>TOUGHNESS</b> も効きやすいです。</li>
-        <li>5000mW：主に <b>TOUGHNESS</b> と <b>TECHNIQUE</b> が重要になりやすいです。</li>
-      </ul>
-
-      <h3 style="margin-top:12px;">駅伝：区間ごとの重要能力（目安）</h3>
-      <ul>
-        <li>1区 10000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
-        <li>2区 3000m：主に <b>SPRINT</b>・<b>SPEED</b> と <b>STAMINA</b> のバランスが効きやすいです。</li>
-        <li>3区 8000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
-        <li>4区 8000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
-        <li>5区 3000m：主に <b>SPRINT</b>・<b>SPEED</b> と <b>STAMINA</b> のバランスが効きやすいです。</li>
-        <li>6区 5000m：主に <b>SPEED</b> と <b>STAMINA</b> に加えて、<b>TOUGHNESS</b> も影響します。</li>
-        <li>7区 5000m：主に <b>SPEED</b> と <b>STAMINA</b> に加えて、<b>TOUGHNESS</b> も影響します。</li>
-      </ul>
-
-      
-
+      <p style="color:#555;">（ここにあなたが文章を書いてください）</p>
       <div class="row" style="margin-top:14px;">
         <button class="secondary" id="back">戻る</button>
       </div>
@@ -625,7 +693,7 @@ function renderRecordResult(state, result) {
 }
 
 function renderSoutaiResult(state, result) {
-  // ★設備レベルアップ（総体優勝）条件は廃止
+  // 設備レベルアップ（総体優勝）条件は廃止
   saveGame(state);
 
   const evOrder = ["800", "1500", "3000sc", "5000", "5000w"];
@@ -646,7 +714,6 @@ function renderSoutaiResult(state, result) {
       </tr>
     `).join("");
 
-    // 自校選手：予選落ちも表示する（備考列あり）
     let myRows = "";
 
     if (er.type === "withFinal") {
@@ -767,9 +834,9 @@ function renderEkidenResult(state, result) {
 
   const q = `自校順位：${result.myRank}位 / 通過：${result.cleared ? "YES" : "NO"}（5位以内）`;
 
-  // ★区間順位＆累積順位（上位5表示）
+  // ★全校表示（sliceしない）
   const splitBlocks = (result.splits ?? []).map(sp => {
-    const top5 = (sp.rows ?? []).slice(0, 5).map(r => `
+    const rows = (sp.rows ?? []).map(r => `
       <tr>
         <td>${r.cumRank}</td>
         <td>${r.school}</td>
@@ -781,7 +848,7 @@ function renderEkidenResult(state, result) {
     `).join("");
 
     return `
-      <h4 style="margin:10px 0 6px 0;">${sp.leg}区（${sp.event}m）時点（上位5）</h4>
+      <h4 style="margin:10px 0 6px 0;">${sp.leg}区（${sp.event}m）時点</h4>
       <div style="overflow:auto;">
         <table style="width:100%; border-collapse:collapse; min-width:720px;">
           <thead>
@@ -789,7 +856,7 @@ function renderEkidenResult(state, result) {
               <th>累積順位</th><th>学校</th><th></th><th>区間順位</th><th>区間タイム</th><th>累積タイム</th>
             </tr>
           </thead>
-          <tbody>${top5}</tbody>
+          <tbody>${rows}</tbody>
         </table>
       </div>
     `;
@@ -821,7 +888,7 @@ function renderEkidenResult(state, result) {
         </table>
       </div>
 
-      <h3 style="margin-top:14px;">各区の順位推移</h3>
+      <h3 style="margin-top:14px;">各区の順位推移（全校）</h3>
       ${splitBlocks}
 
       <div class="row" style="margin-top:14px;">
@@ -843,9 +910,13 @@ function runYearUpdate(state) {
 
   ensureFacilities(state);
 
-  // ★年度更新で駅伝通過条件もリセット（新年度はまた地区から）
+  // 新年度なので駅伝通過条件はリセット
   ensureQualify(state);
   state.qualify.ekiden = { prefecture: false, region: false, national: false };
+
+  // スカウトの「その年の成績」もリセット（次年度はまた積む）
+  ensureScout(state);
+  state.scout.lastEkidenTier = "none";
 }
 
 // --- ラベル ---
