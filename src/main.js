@@ -284,17 +284,20 @@ function renderFacilities(state) {
 }
 
 function renderAthletes(state) {
+  // ★表示は小数切り捨て
+  const f = (n) => Math.floor(n);
+
   const rows = (state.athletes ?? []).map(a => `
     <tr>
       <td>${a.grade}</td>
       <td>${a.name}</td>
       <td>${a.personality}</td>
-      <td>${a.abilities.sprint}</td>
-      <td>${a.abilities.speed}</td>
-      <td>${a.abilities.stamina}</td>
-      <td>${a.abilities.toughness}</td>
-      <td>${a.abilities.technique}</td>
-      <td>${a.overall}</td>
+      <td>${f(a.abilities.sprint)}</td>
+      <td>${f(a.abilities.speed)}</td>
+      <td>${f(a.abilities.stamina)}</td>
+      <td>${f(a.abilities.toughness)}</td>
+      <td>${f(a.abilities.technique)}</td>
+      <td>${f(a.overall)}</td>
     </tr>
   `).join("");
 
@@ -381,23 +384,22 @@ function upgradeFacilityBySoutaiWinners(state, result) {
 
 // --- 結果画面 ---
 function renderRecordResult(state, result) {
+  // ★組/組順位を消す（全体順位＋選手＋タイムだけ）
   const sections = ["1500", "3000", "5000"].map(ev => {
     const rows = result.playerOnly[ev].map(r => `
       <tr>
         <td>${r.overallRank}</td>
         <td>${r.athlete.name}</td>
         <td>${r.timeText}</td>
-        <td>${r.groupIndex}</td>
-        <td>${r.rankInGroup}</td>
       </tr>
     `).join("");
 
     return `
       <h3 style="margin-top:14px;">${ev}m（自校）</h3>
       <div style="overflow:auto;">
-        <table style="width:100%; border-collapse:collapse; min-width:520px;">
+        <table style="width:100%; border-collapse:collapse; min-width:420px;">
           <thead>
-            <tr><th>全体順位</th><th>選手</th><th>タイム</th><th>組</th><th>組順位</th></tr>
+            <tr><th>全体順位</th><th>選手</th><th>タイム</th></tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>
@@ -423,10 +425,14 @@ function renderSoutaiResult(state, result) {
   saveGame(state);
 
   const evOrder = ["800", "1500", "3000sc", "5000", "5000w"];
+
   const sections = evOrder.map(ev => {
     const er = result.events[ev];
     if (!er) return "";
+
     const list = er.type === "withFinal" ? er.final : er.overall;
+
+    // 上位10（全体）
     const top = list.slice(0, 10).map((x, i) => `
       <tr>
         <td>${i + 1}</td>
@@ -437,14 +443,38 @@ function renderSoutaiResult(state, result) {
       </tr>
     `).join("");
 
+    // ★自校選手一覧（全体順位＋タイム）
+    const myRows = list
+      .map((x, i) => ({ ...x, rank: i + 1 }))
+      .filter(x => x.isPlayer)
+      .map(x => `
+        <tr>
+          <td>${x.rank}</td>
+          <td>${x.athlete.name}</td>
+          <td>${x.timeText}</td>
+        </tr>
+      `).join("") || `<tr><td colspan="3">自校選手なし</td></tr>`;
+
     return `
       <h3 style="margin-top:14px;">${eventLabel(ev)}</h3>
+
+      <h4 style="margin:10px 0 6px 0;">全体（上位10）</h4>
       <div style="overflow:auto;">
         <table style="width:100%; border-collapse:collapse; min-width:560px;">
           <thead>
             <tr><th>順位</th><th>学校</th><th></th><th>選手</th><th>タイム</th></tr>
           </thead>
           <tbody>${top}</tbody>
+        </table>
+      </div>
+
+      <h4 style="margin:10px 0 6px 0;">自校選手</h4>
+      <div style="overflow:auto;">
+        <table style="width:100%; border-collapse:collapse; min-width:420px;">
+          <thead>
+            <tr><th>全体順位</th><th>選手</th><th>タイム</th></tr>
+          </thead>
+          <tbody>${myRows}</tbody>
         </table>
       </div>
     `;
@@ -538,19 +568,14 @@ function renderSimpleMessage(state, title, okText, okFn) {
 
 // --- 年度更新：state.js と完全一致させる版 ---
 function runYearUpdate(state) {
-  // state.js のロジックを使う（新入生の能力分布も一致）
   applyYearUpdateToState(state);
-
-  // 相手校も年度更新（設備Lvは保持）
   rivalsYearUpdate(state);
 
-  // 通過情報は翌年にリセット
   state.qualify = {
     soutai: { prefecturePairs: [], regionPairs: [], nationalPairs: [] },
     ekiden: { prefecture: false, region: false, national: false },
   };
 
-  // 設備は保持（強化していく）
   ensureFacilities(state);
 }
 
