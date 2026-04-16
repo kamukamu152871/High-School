@@ -86,12 +86,12 @@ function ensureScout(state) {
 
 function ensureRecords(state) {
   state.records ??= {
-    events: { "800": [], "1500": [], "3000sc": [], "5000": [], "5000w": [] },
+    events: { "800": [], "1500": [], "3000": [], "3000sc": [], "5000": [], "5000w": [] },
     ekidenLegs: { "1": [], "2": [], "3": [], "4": [], "5": [], "6": [], "7": [] },
     ekidenTotal: [],
   };
   state.records.events ??= {};
-  for (const ev of ["800", "1500", "3000sc", "5000", "5000w"]) state.records.events[ev] ??= [];
+  for (const ev of ["800", "1500", "3000", "3000sc", "5000", "5000w"]) state.records.events[ev] ??= [];
   state.records.ekidenLegs ??= {};
   for (const leg of ["1", "2", "3", "4", "5", "6", "7"]) state.records.ekidenLegs[leg] ??= [];
   state.records.ekidenTotal ??= [];
@@ -138,6 +138,25 @@ function updateRecordsFromSoutai(state, result) {
         when: result.when,
       };
 
+      state.records.events[ev] = upsertTop10NoDupByAthlete(state.records.events[ev], entry, "timeSec");
+    }
+  }
+}
+
+function updateRecordsFromRecordMeet(state, result) {
+  ensureRecords(state);
+
+  for (const ev of ["1500", "3000", "5000"]) {
+    if (!state.records.events[ev]) continue;
+    for (const x of (result.events?.[ev] ?? [])) {
+      if (!x.isPlayer) continue;
+      const entry = {
+        athleteId: x.athlete?.id ?? `${x.athlete?.name ?? "unknown"}`,
+        athleteName: x.athlete?.name ?? "",
+        timeSec: x.timeSec,
+        timeText: x.timeText,
+        when: result.when,
+      };
       state.records.events[ev] = upsertTop10NoDupByAthlete(state.records.events[ev], entry, "timeSec");
     }
   }
@@ -285,6 +304,7 @@ function renderRecords(state) {
   const evOrder = [
     { key: "800", label: "800m" },
     { key: "1500", label: "1500m" },
+    { key: "3000", label: "3000m" },
     { key: "3000sc", label: "3000mSC" },
     { key: "5000", label: "5000m" },
     { key: "5000w", label: "5000mW" },
@@ -537,6 +557,7 @@ function renderTitle() {
       </div>
 
       <p style="margin-top:12px;color:#555;">端末内（ブラウザ）に自動でセーブされます。</p>
+      <p style="margin-top:8px;color:#b00;">※大きく仕様変更したので、最初は「セーブ削除」を推奨します。</p>
     </div>
   `;
 
@@ -650,6 +671,7 @@ function renderHome(state) {
           onCancel: () => renderHome(state),
           onConfirm: (picks) => {
             const result = runRecordMeet(state, picks);
+            updateRecordsFromRecordMeet(state, result);
             saveGame(state);
             renderRecordResult(state, result);
           }
@@ -992,6 +1014,64 @@ function renderSoutaiResult(state, result) {
       </tr>
     `).join("");
 
+    let playerRows = [];
+
+    if (er.type === "withFinal") {
+      const heats = er.heats ?? [];
+      const allHeatResults = heats.flatMap(h =>
+        (h.results ?? []).map((x, i) => ({
+          ...x,
+          heat: h.heat,
+          rankInHeat: i + 1,
+        }))
+      );
+      const prelimRankMap = new Map(
+        allHeatResults
+          .slice()
+          .sort((a, b) => a.timeSec - b.timeSec)
+          .map((x, i) => [(x.athlete?.id ?? x.athlete?.name ?? `unknown-${i}`), i + 1])
+      );
+
+      playerRows = allHeatResults
+        .filter(x => x.isPlayer)
+        .map((x, i) => {
+          const key = x.athlete?.id ?? x.athlete?.name ?? `unknown-${i}`;
+          const finalRank = (er.final ?? []).findIndex(f => (f.athlete?.id ?? f.athlete?.name) === key);
+          const isFinalist = finalRank >= 0;
+          const shown = isFinalist ? er.final[finalRank] : x;
+          return {
+            athleteName: x.athlete?.name ?? "",
+            overallRank: isFinalist ? (finalRank + 1) : (prelimRankMap.get(key) ?? "-"),
+            timeText: shown.timeText,
+            remark: isFinalist ? `決勝${finalRank + 1}位` : `予選${x.heat}組${x.rankInHeat}着`,
+          };
+        })
+        .sort((a, b) => {
+          const ra = typeof a.overallRank === "number" ? a.overallRank : 9999;
+          const rb = typeof b.overallRank === "number" ? b.overallRank : 9999;
+          return ra - rb;
+        });
+    } else {
+      playerRows = (er.overall ?? [])
+        .map((x, i) => ({ ...x, overallRank: i + 1 }))
+        .filter(x => x.isPlayer)
+        .map(x => ({
+          athleteName: x.athlete?.name ?? "",
+          overallRank: x.overallRank,
+          timeText: x.timeText,
+          remark: "-",
+        }));
+    }
+
+    const playerTableRows = playerRows.map(r => `
+      <tr>
+        <td>${r.overallRank}</td>
+        <td>${r.athleteName}</td>
+        <td>${r.timeText}</td>
+        <td>${r.remark}</td>
+      </tr>
+    `).join("") || `<tr><td colspan="4" style="color:#777;">該当なし</td></tr>`;
+
     return `
       <h3 style="margin-top:14px;">${eventLabel(ev)}</h3>
       <h4 style="margin:10px 0 6px 0;">全体（上位10）</h4>
@@ -1001,6 +1081,15 @@ function renderSoutaiResult(state, result) {
             <tr><th>順位</th><th>学校</th><th></th><th>選手</th><th>タイム</th></tr>
           </thead>
           <tbody>${top}</tbody>
+        </table>
+      </div>
+      <h4 style="margin:10px 0 6px 0;">自校選手</h4>
+      <div style="overflow:auto;">
+        <table style="width:100%; border-collapse:collapse; min-width:560px;">
+          <thead>
+            <tr><th>総合順位</th><th>選手</th><th>タイム</th><th>備考</th></tr>
+          </thead>
+          <tbody>${playerTableRows}</tbody>
         </table>
       </div>
     `;
