@@ -9,6 +9,7 @@ function formatHMS(totalSec) {
   return `${h}時間${m}分${sec}秒`;
 }
 
+// teamPicks: [{leg,event,athlete}] 7つ
 function runTeamTime(teamPicks) {
   const legs = teamPicks.map(x => {
     const power = calcEventPower(x.athlete, x.event);
@@ -37,6 +38,74 @@ function nextStageKey(stageKey) {
   return null;
 }
 
+// legごとに「区間順位」「累積順位」を計算して返す
+function buildSplits(rankedTeams) {
+  // rankedTeams: [{school,isPlayer,legs:[{leg,timeSec...}], ...}]
+  const splits = []; // [{leg,event,rows:[{rank,school,isPlayer,legTimeText,totalText}]}]
+
+  // 1〜7区を前提（legs配列も7）
+  for (let leg = 1; leg <= 7; leg++) {
+    // この区間までの累積
+    const withCum = rankedTeams.map(team => {
+      const cum = team.legs
+        .filter(x => x.leg <= leg)
+        .reduce((sum, x) => sum + x.timeSec, 0);
+
+      const legObj = team.legs.find(x => x.leg === leg);
+      return {
+        school: team.school,
+        isPlayer: team.isPlayer,
+        leg,
+        event: legObj?.event ?? "",
+        legTimeSec: legObj?.timeSec ?? 99999,
+        legTimeText: legObj?.timeText ?? "",
+        cumSec: cum,
+      };
+    });
+
+    // 区間順位（その区間タイム順）
+    const legRanked = withCum
+      .slice()
+      .sort((a, b) => a.legTimeSec - b.legTimeSec)
+      .map((x, i) => ({ ...x, legRank: i + 1 }));
+
+    // 累積順位（その時点の合計順）
+    const cumRanked = withCum
+      .slice()
+      .sort((a, b) => a.cumSec - b.cumSec)
+      .map((x, i) => ({ ...x, cumRank: i + 1 }));
+
+    // 同じ学校で合流
+    const map = new Map();
+    for (const x of legRanked) map.set(x.school, { ...x });
+    for (const x of cumRanked) {
+      const cur = map.get(x.school);
+      map.set(x.school, { ...cur, cumRank: x.cumRank, cumSec: x.cumSec });
+    }
+
+    const rows = Array.from(map.values())
+      .sort((a, b) => a.cumRank - b.cumRank) // 表示は累積順位順が見やすい
+      .map(x => ({
+        school: x.school,
+        isPlayer: x.isPlayer,
+        leg: x.leg,
+        event: x.event,
+        legRank: x.legRank,
+        cumRank: x.cumRank,
+        legTimeText: x.legTimeText,
+        cumText: formatHMS(x.cumSec),
+      }));
+
+    splits.push({
+      leg,
+      event: rows[0]?.event ?? "",
+      rows,
+    });
+  }
+
+  return splits;
+}
+
 // playerPicks: [{leg,event,athlete}] 7つ
 export function runEkiden(state, stageKey, playerPicks) {
   const rivals = state.rivals?.[stageKey] ?? [];
@@ -63,6 +132,9 @@ export function runEkiden(state, stageKey, playerPicks) {
     when: `${state.month}月${state.week}週`,
     ranking: ranked,
 
+    // ★追加：区間ごとの順位（区間順位＆累積順位）
+    splits: buildSplits(ranked),
+
     // 次大会へ持ち越す上位5チーム（学校オブジェクトを保持）
     top5Teams: [],
   };
@@ -75,7 +147,6 @@ export function runEkiden(state, stageKey, playerPicks) {
   if (toStage) {
     result.top5Teams = ranked.slice(0, 5).map(x => {
       if (x.isPlayer) {
-        // プレイヤー校は schoolObj が無いので、stateから再構築できる形で入れる
         return {
           fromStage: stageKey,
           toStage,
@@ -83,7 +154,6 @@ export function runEkiden(state, stageKey, playerPicks) {
           team: { name: state.teamName, athletes: state.athletes },
         };
       }
-      // 相手校は schoolObj をそのまま持ち越す（固定能力方針ならOK）
       return {
         fromStage: stageKey,
         toStage,
