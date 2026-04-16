@@ -79,8 +79,21 @@ function createInitialAthletes() {
   return athletes;
 }
 
+function ensureScout(state) {
+  state.scout ??= {
+    pool: [],       // 3月4週に生成する10人
+    selected: [],   // 選ばれたn人（翌4月加入）
+    max: 1,         // 選べる人数
+    lastEkidenTier: "none", // その年の駅伝結果の段階（表示用）
+  };
+  state.scout.pool ??= [];
+  state.scout.selected ??= [];
+  state.scout.max ??= 1;
+  state.scout.lastEkidenTier ??= "none";
+}
+
 export function createNewGameState() {
-  return {
+  const state = {
     year: 1,
     month: 4,
     week: 1,
@@ -102,23 +115,29 @@ export function createNewGameState() {
     // 相手校（rivals.js が生成）
     rivals: null,
 
-    // 旧仕様互換：残してOK（当面 main.js が参照している）
+    // 旧仕様互換
     qualify: {
       soutai: { prefecturePairs: [], regionPairs: [], nationalPairs: [] },
       ekiden: { prefecture: false, region: false, national: false },
     },
 
-    // ★新仕様：次大会に混ぜる枠（他校も含む）
+    // 次大会に混ぜる枠
     carry: {
-      // 総体：次ステージへ混ぜる「選手（個人）」枠
-      // 例：{ fromStage:"district", toStage:"prefecture", event:"1500", athlete:{...}, schoolName:"○○高校" }
       soutai: { next: [] },
-
-      // 駅伝：次ステージへ混ぜる「高校（学校）」枠
-      // 例：{ fromStage:"district", toStage:"prefecture", schoolName:"○○高校", teamSnapshot:{...} }
       ekiden: { next: [] },
     },
+
+    // ★追加：スカウト
+    scout: {
+      pool: [],
+      selected: [],
+      max: 1,
+      lastEkidenTier: "none",
+    },
   };
+
+  ensureScout(state);
+  return state;
 }
 
 export function saveGame(state) {
@@ -141,15 +160,15 @@ export function loadGame() {
       ekiden: { prefecture: false, region: false, national: false },
     };
 
-    // ★新セーブ救済（carry）
-    state.carry ??= {
-      soutai: { next: [] },
-      ekiden: { next: [] },
-    };
+    // 新セーブ救済（carry）
+    state.carry ??= { soutai: { next: [] }, ekiden: { next: [] } };
     state.carry.soutai ??= { next: [] };
     state.carry.ekiden ??= { next: [] };
     state.carry.soutai.next ??= [];
     state.carry.ekiden.next ??= [];
+
+    // ★新：スカウト救済
+    ensureScout(state);
 
     return state;
   } catch {
@@ -215,14 +234,54 @@ export function createAthletePublic(grade, index) {
   };
 }
 
+// ★スカウト候補（1年生）を作る：能力が21〜60
+export function createScoutFreshman(index) {
+  const r = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+  const abilities = {
+    sprint: r(21, 60),
+    speed: r(21, 60),
+    stamina: r(21, 60),
+    toughness: r(21, 60),
+    technique: r(21, 60),
+  };
+  const ov = Math.round(
+    (abilities.sprint + abilities.speed + abilities.stamina + abilities.toughness + abilities.technique) / 5
+  );
+
+  return {
+    id: `scout-1-${index}-${crypto.randomUUID?.() ?? Math.random()}`,
+    grade: 1,
+    name: createRandomName(),
+    personality: createPersonality(),
+    abilities,
+    overall: ov,
+  };
+}
+
 export function applyYearUpdateToState(state) {
-  // 3年引退→進級→新1年生5人（state.jsの分布で生成）
+  ensureScout(state);
+
+  // 3年引退→進級
   const survivors = state.athletes.filter(a => a.grade !== 3);
   for (const a of survivors) a.grade += 1;
 
+  // 新1年生5人：スカウト生を優先
   const freshmen = [];
-  for (let i = 0; i < 5; i++) freshmen.push(createAthletePublic(1, i));
+
+  const selected = (state.scout.selected ?? []).slice(0, 5);
+  for (const s of selected) {
+    // 念のためgrade=1に統一
+    freshmen.push({ ...s, grade: 1 });
+  }
+
+  // 残り枠を従来の確率で生成
+  const rest = 5 - freshmen.length;
+  for (let i = 0; i < rest; i++) freshmen.push(createAthletePublic(1, i));
 
   state.athletes = freshmen.concat(survivors);
   state.year += 1;
+
+  // 使い終わったらスカウト情報をリセット（次年度用）
+  state.scout.pool = [];
+  state.scout.selected = [];
 }
