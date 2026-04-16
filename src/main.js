@@ -560,7 +560,7 @@ function stageTitleEkiden(key) {
   if (key === "district") return "地区駅伝";
   if (key === "prefecture") return "県駅伝";
   if (key === "region") return "地域駅伝";
-  if (key === "national") return "全国駅��";
+  if (key === "national") return "全国駅伝";
   return "駅伝";
 }
 function eventLabel(ev) {
