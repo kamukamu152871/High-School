@@ -92,7 +92,7 @@ function renderRecordPicker(app, state, { onCancel, onConfirm }) {
 }
 
 // ===== 総体 =====
-function renderSoutaiPicker(app, state, { allowedEvents = null, onCancel, onConfirm }) {
+function renderSoutaiPicker(app, state, { allowedEvents = null, allowedPairs = null,onCancel, onConfirm }) {
   const events = allowedEvents ?? EVENTS_MEET;
   const picks = []; // {athlete, event}
   let listScrollTop = 0;
