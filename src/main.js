@@ -96,6 +96,18 @@ function buildSoutaiRivalsWithCarry(state, stageKey) {
   return base.concat([mixed]);
 }
 
+function buildPlayerFixedSoutaiPicksFromCarry(state, stageKey) {
+  // stageKey（prefecture/region/national）に対して、
+  // carry.soutai.next の中から「toStage一致 & isPlayer=true」だけを使って確定枠を作る
+  ensureCarry(state);
+
+  const src = (state.carry.soutai.next ?? [])
+    .filter(x => x.toStage === stageKey && x.isPlayer);
+
+  // UI/meetは [{athlete,event}] の形を期待する
+  return src.map(x => ({ athlete: x.athlete, event: x.event }));
+}
+
 // 駅伝：top5Teams の team（学校オブジェクト）を追加（重複除外）
 function buildEkidenRivalsWithCarry(state, stageKey) {
   ensureRivals(state);
@@ -242,38 +254,43 @@ function renderHome(state) {
         });
         return;
       }
+if (meet.type === "soutai") {
+  // carry混ぜ込み（次ステージ宛の上位選手を混成校として追加）
+  const original = state.rivals?.[meet.stage];
+  state.rivals[meet.stage] = buildSoutaiRivalsWithCarry(state, meet.stage);
 
-      if (meet.type === "soutai") {
-        // ★carry混ぜ込み（次ステージ宛の上位選手を混成校として追加）
-        const original = state.rivals?.[meet.stage];
-        state.rivals[meet.stage] = buildSoutaiRivalsWithCarry(state, meet.stage);
+  const readOnly = meet.stage !== "district";
 
-        // 県以降は本来「確認画面」だが、まずは readOnly モードで操作不可にする
-        const readOnly = meet.stage !== "district";
+  // ★県以降：前大会上位枠（自校分）を固定化して確認画面に表示
+  const fixedPicks = readOnly ? buildPlayerFixedSoutaiPicksFromCarry(state, meet.stage) : null;
 
-        renderPicker(app, "soutai", state, {
-          allowedEvents: null,
-          allowedPairs: null,
-          readOnly,
-          onCancel: () => {
-            state.rivals[meet.stage] = original;
-            renderHome(state);
-          },
-          onConfirm: (picks) => {
-            const result = runSoutai(state, meet.stage, picks, null);
+  renderPicker(app, "soutai", state, {
+    allowedEvents: null,
+    allowedPairs: null,
+    readOnly,
+    fixedPicks, // ★追加
+    onCancel: () => {
+      state.rivals[meet.stage] = original;
+      renderHome(state);
+    },
+    onConfirm: (picks) => {
+      // districtは手動選出したpicks
+      // prefecture/region/nationalは fixedPicks をそのまま使う
+      const submit = readOnly ? (fixedPicks ?? []) : picks;
 
-            // ★新仕様：次大会に混ぜる“上位選手”を保存
-            state.carry.soutai.next = result.carryCandidates ?? [];
+      const result = runSoutai(state, meet.stage, submit, null);
 
-            // 元に戻す
-            state.rivals[meet.stage] = original;
+      // 次大会に混ぜる“上位選手”を保存（全校分）
+      state.carry.soutai.next = result.carryCandidates ?? [];
 
-            saveGame(state);
-            renderSoutaiResult(state, result);
-          }
-        });
-        return;
-      }
+      state.rivals[meet.stage] = original;
+
+      saveGame(state);
+      renderSoutaiResult(state, result);
+    }
+  });
+  return;
+}
 
       if (meet.type === "ekiden") {
         // ★carry混ぜ込み（次ステージ宛の上位5校を追加）
