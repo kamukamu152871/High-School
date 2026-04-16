@@ -22,8 +22,8 @@ export const TRAININGS = [
 ];
 
 export function personalityBonus(personality, stat) {
-  if (personality === "てんさい") return 2;
-  if (personality === "ふつう") return 1;
+  if (personality === "てんさい") return 1;
+  if (personality === "ふつう") return 0.5;
 
   const map = {
     "たんき": "sprint",
@@ -32,7 +32,7 @@ export function personalityBonus(personality, stat) {
     "がんこ": "toughness",
     "きよう": "technique",
   };
-  return map[personality] === stat ? 2 : 0;
+  return map[personality] === stat ? 1: 0;
 }
 
 export function clamp1to100(n) {
