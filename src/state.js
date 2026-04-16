@@ -24,24 +24,29 @@ function createPersonality() {
   return "てんさい";
 }
 
-// 1年生能力：
-// 45% -> 1-20, 50% -> 21-40, 5% -> 41-50
-function baseAbilityFreshman() {
+// 学年別：45% / 50% / 5% の分布
+function sampleByRanges(ranges) {
   const r = Math.random() * 100;
-  if (r < 45) return randInt(1, 20);
-  if (r < 95) return randInt(21, 40);
-  return randInt(41, 50);
+  if (r < 45) return randInt(ranges[0][0], ranges[0][1]);
+  if (r < 95) return randInt(ranges[1][0], ranges[1][1]);
+  return randInt(ranges[2][0], ranges[2][1]);
+}
+
+function rangesByGrade(grade) {
+  // A案
+  if (grade === 1) return [[1, 20], [21, 40], [41, 50]];
+  if (grade === 2) return [[11, 30], [31, 50], [51, 60]];
+  return [[21, 40], [41, 60], [61, 70]]; // grade 3
 }
 
 function createAbilitiesByGrade(grade) {
-  const add = grade === 1 ? 0 : grade === 2 ? 10 : 20;
-
+  const ranges = rangesByGrade(grade);
   return {
-    sprint: baseAbilityFreshman() + add,
-    speed: baseAbilityFreshman() + add,
-    stamina: baseAbilityFreshman() + add,
-    toughness: baseAbilityFreshman() + add,
-    technique: baseAbilityFreshman() + add,
+    sprint: sampleByRanges(ranges),
+    speed: sampleByRanges(ranges),
+    stamina: sampleByRanges(ranges),
+    toughness: sampleByRanges(ranges),
+    technique: sampleByRanges(ranges),
   };
 }
 
@@ -83,13 +88,13 @@ export function createNewGameState() {
     teamName: "自校",
     athletes: createInitialAthletes(),
 
-    // 設備レベル（練習ごとに1-4）
+    // プレイヤー校：最初は全部Lv1
     facilities: {
-      nagashi: 2,
-      tt: 2,
-      jog: 2,
-      interval: 2,
-      circuit: 2,
+      nagashi: 1,
+      tt: 1,
+      jog: 1,
+      interval: 1,
+      circuit: 1,
     },
 
     lastTraining: null,
@@ -97,12 +102,7 @@ export function createNewGameState() {
 
     rivals: null,
     qualify: {
-      // 今後：厳密な通過（選手×種目）をここに入れる
-      soutai: {
-        prefecturePairs: [], // [{athleteId,event}]
-        regionPairs: [],
-        nationalPairs: [],
-      },
+      soutai: { prefecturePairs: [], regionPairs: [], nationalPairs: [] },
       ekiden: { prefecture: false, region: false, national: false },
     },
   };
@@ -115,11 +115,12 @@ export function saveGame(state) {
 export function loadGame() {
   const raw = localStorage.getItem(SAVE_KEY);
   if (!raw) return null;
+
   try {
     const state = JSON.parse(raw);
 
-    // 旧セーブ救済（施設）
-    state.facilities ??= { nagashi: 2, tt: 2, jog: 2, interval: 2, circuit: 2 };
+    // 旧セーブ救済（設備）
+    state.facilities ??= { nagashi: 1, tt: 1, jog: 1, interval: 1, circuit: 1 };
 
     // 旧セーブ救済（通過管理）
     state.qualify ??= {
