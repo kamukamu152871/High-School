@@ -84,7 +84,6 @@ function buildSoutaiRivalsWithCarry(state, stageKey) {
   const carry = (state.carry.soutai.next ?? []).filter(x => x.toStage === stageKey);
   if (carry.length === 0) return base;
 
-  // すでにいる学校名（同名は重複させない）
   const baseNames = new Set(base.map(s => s.name));
 
   // carry選手を「所属校名」ごとにまとめる
@@ -95,8 +94,7 @@ function buildSoutaiRivalsWithCarry(state, stageKey) {
     bySchool.get(schoolName).push(c.athlete);
   }
 
-  // 所属校名ごとに“仮想校”を追加
-  // ※同名の学校が base に存在する場合は、そこに合流させる（選手を足す）
+  // 所属校名ごとに“仮想校”を追加（同名があれば合流）
   for (const [schoolName, athletes] of bySchool.entries()) {
     if (baseNames.has(schoolName)) {
       const s = base.find(x => x.name === schoolName);
@@ -114,6 +112,7 @@ function buildSoutaiRivalsWithCarry(state, stageKey) {
 
   return base;
 }
+
 // 駅伝：top5Teams の team（学校オブジェクト）を追加（重複除外）
 function buildEkidenRivalsWithCarry(state, stageKey) {
   ensureRivals(state);
@@ -129,7 +128,6 @@ function buildEkidenRivalsWithCarry(state, stageKey) {
 
   const baseNames = new Set(base.map(s => s.name));
   const add = carryTeams.filter(t => !baseNames.has(t.name));
-
   return base.concat(add);
 }
 
@@ -169,7 +167,6 @@ function renderTitle() {
       </div>
 
       <p style="margin-top:12px;color:#555;">端末内（ブラウザ）に自動でセーブされます。</p>
-      <p style="margin-top:8px;color:#b00;">※大きく仕様変更したので、最初は「セーブ削除」を推奨します。</p>
     </div>
   `;
 
@@ -372,6 +369,7 @@ function renderRenameTeam(state) {
 }
 
 function renderHelp(state) {
+  // ヘルプ本文はここを編集してください
   app.innerHTML = `
     <div class="card">
       <h2>ヘルプ</h2>
@@ -380,7 +378,7 @@ function renderHelp(state) {
       <ul>
         <li>ホームで練習を選ぶ → 週が進みます。</li>
         <li>大会がある週は、練習後に出場確認/選出して大会を実行します。</li>
-        <li>結果を見たら「OK（次の週へ）」で進みます。</li>
+        <li>結果を見たら「OK（���の週へ）」で進みます。</li>
       </ul>
 
       <h3 style="margin-top:12px;">能力の種類</h3>
@@ -415,25 +413,24 @@ function renderHelp(state) {
 
       <h3 style="margin-top:12px;">総体：種目ごとの重要能力（目安）</h3>
       <ul>
-        <li>800m：主に <b>SPRINT</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
-        <li>1500m：主に <b>SPRINT</b> と <b>SPEED</b>、さらに <b>STAMINA</b> も影響します。</li>
-        <li>3000mSC：主に <b>SPEED</b>・<b>STAMINA</b> に加えて、<b>TECHNIQUE</b> の影響が出やすいです。</li>
-        <li>5000m：主に <b>SPEED</b> と <b>STAMINA</b>、さらに <b>TOUGHNESS</b> も効きやすいです。</li>
-        <li>5000mW：主に <b>TOUGHNESS</b> と <b>TECHNIQUE</b> が重要になりやすいです。</li>
+        <li>800m：主に <b>SPRINT</b> と <b>TOUGHNESS</b></li>
+        <li>1500m：主に <b>SPRINT</b> と <b>SPEED</b>（＋<b>STAMINA</b>）</li>
+        <li>3000mSC：主に <b>SPEED</b> と <b>STAMINA</b>（＋<b>TECHNIQUE</b>）</li>
+        <li>5000m：主に <b>SPEED</b> と <b>STAMINA</b>（＋<b>TOUGHNESS</b>）</li>
+        <li>5000mW：主に <b>TOUGHNESS</b> と <b>TECHNIQUE</b></li>
       </ul>
 
       <h3 style="margin-top:12px;">駅伝：区間ごとの重要能力（目安）</h3>
       <ul>
-        <li>1区 10000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
-        <li>2区 3000m：主に <b>SPRINT</b>・<b>SPEED</b> と <b>STAMINA</b> のバランスが効きやすいです。</li>
-        <li>3区 8000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
-        <li>4区 8000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
-        <li>5区 3000m：主に <b>SPRINT</b>・<b>SPEED</b> と <b>STAMINA</b> のバランスが効きやすいです。</li>
-        <li>6区 5000m：主に <b>SPEED</b> と <b>STAMINA</b> に加えて、<b>TOUGHNESS</b> も影響します。</li>
-        <li>7区 5000m：主に <b>SPEED</b> と <b>STAMINA</b> に加えて、<b>TOUGHNESS</b> も影響します。</li>
+        <li>1区 10000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b></li>
+        <li>2区 3000m：主に <b>SPRINT</b> と <b>SPEED</b>（＋<b>STAMINA</b>）</li>
+        <li>3区 8000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b></li>
+        <li>4区 8000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b></li>
+        <li>5区 3000m：主に <b>SPRINT</b> と <b>SPEED</b>（＋<b>STAMINA</b>）</li>
+        <li>6区 5000m：主に <b>SPEED</b> と <b>STAMINA</b>（＋<b>TOUGHNESS</b>）</li>
+        <li>7区 5000m：主に <b>SPEED</b> と <b>STAMINA</b>（＋<b>TOUGHNESS</b>）</li>
       </ul>
 
-     
       <div class="row" style="margin-top:14px;">
         <button class="secondary" id="back">戻る</button>
       </div>
@@ -441,6 +438,7 @@ function renderHelp(state) {
   `;
   document.querySelector("#back").onclick = () => renderHome(state);
 }
+
 function renderFacilities(state) {
   ensureFacilities(state);
   const f = state.facilities;
@@ -564,16 +562,66 @@ function renderSoutaiResult(state, result) {
       </tr>
     `).join("");
 
-    const myRows = list
-      .map((x, i) => ({ ...x, rank: i + 1 }))
-      .filter(x => x.isPlayer)
-      .map(x => `
+    // ★自校選手：予選落ちも表示する（備考列あり）
+    let myRows = "";
+
+    if (er.type === "withFinal") {
+      const finalList = er.final ?? [];
+      const heats = er.heats ?? [];
+
+      const finalists = finalList
+        .map((x, i) => ({ ...x, rank: i + 1 }))
+        .filter(x => x.isPlayer);
+
+      const heatPlayers = [];
+      for (const h of heats) {
+        for (let i = 0; i < (h.results ?? []).length; i++) {
+          const x = h.results[i];
+          if (!x.isPlayer) continue;
+          heatPlayers.push({
+            ...x,
+            heat: h.heat,
+            heatRank: i + 1,
+          });
+        }
+      }
+
+      if (finalists.length > 0) {
+        myRows = finalists.map(x => `
+          <tr>
+            <td>${x.rank}</td>
+            <td>${x.athlete.name}</td>
+            <td>${x.timeText}</td>
+            <td>決勝</td>
+          </tr>
+        `).join("");
+      } else if (heatPlayers.length > 0) {
+        myRows = heatPlayers.map(x => `
+          <tr>
+            <td>—</td>
+            <td>${x.athlete.name}</td>
+            <td>${x.timeText}</td>
+            <td>予選敗退（${x.heat}組${x.heatRank}着）</td>
+          </tr>
+        `).join("");
+      } else {
+        myRows = `<tr><td colspan="4">自校選手なし</td></tr>`;
+      }
+    } else {
+      const overallList = er.overall ?? [];
+      const mine = overallList
+        .map((x, i) => ({ ...x, rank: i + 1 }))
+        .filter(x => x.isPlayer);
+
+      myRows = mine.map(x => `
         <tr>
           <td>${x.rank}</td>
           <td>${x.athlete.name}</td>
           <td>${x.timeText}</td>
+          <td>—</td>
         </tr>
-      `).join("") || `<tr><td colspan="3">自校選手なし</td></tr>`;
+      `).join("") || `<tr><td colspan="4">自校選手なし</td></tr>`;
+    }
 
     return `
       <h3 style="margin-top:14px;">${eventLabel(ev)}</h3>
@@ -590,9 +638,9 @@ function renderSoutaiResult(state, result) {
 
       <h4 style="margin:10px 0 6px 0;">自校選手</h4>
       <div style="overflow:auto;">
-        <table style="width:100%; border-collapse:collapse; min-width:420px;">
+        <table style="width:100%; border-collapse:collapse; min-width:520px;">
           <thead>
-            <tr><th>全体順位</th><th>選手</th><th>タイム</th></tr>
+            <tr><th>全体順位</th><th>選手</th><th>タイム</th><th>備考</th></tr>
           </thead>
           <tbody>${myRows}</tbody>
         </table>
@@ -651,7 +699,7 @@ function renderEkidenResult(state, result) {
         </table>
       </div>
 
-      <h3 style="margin-top:14px;">自校区間タイム</h3>
+      <h3 style="margin-top:14px;">自校区間タイ���</h3>
       <div style="overflow:auto;">
         <table style="width:100%; border-collapse:collapse; min-width:520px;">
           <thead>
