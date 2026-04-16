@@ -98,15 +98,13 @@ function ensureRecords(state) {
 }
 
 // 速いほど良い（timeSecが小さいほど上）
+// 同一選手は1ランキング内で重複禁止：良い記録なら置換、悪いなら無視
 function upsertTop10NoDupByAthlete(list, entry, keyTime = "timeSec") {
   const arr = (list ?? []).slice();
 
-  // 同一選手は1つだけにする（良い方を残す）
   const idx = arr.findIndex(x => x.athleteId === entry.athleteId);
   if (idx >= 0) {
-    if (entry[keyTime] < arr[idx][keyTime]) {
-      arr[idx] = entry;
-    }
+    if (entry[keyTime] < arr[idx][keyTime]) arr[idx] = entry;
   } else {
     arr.push(entry);
   }
@@ -115,7 +113,6 @@ function upsertTop10NoDupByAthlete(list, entry, keyTime = "timeSec") {
   return arr.slice(0, 10);
 }
 
-// チーム総合は重複禁止の概念がないので通常top10
 function pushTop10(list, entry, keyTime) {
   const arr = (list ?? []).slice();
   arr.push(entry);
@@ -127,7 +124,7 @@ function updateRecordsFromSoutai(state, result) {
   ensureRecords(state);
 
   for (const [ev, er] of Object.entries(result.events ?? {})) {
-    if (!state.records.events[ev]) continue; // 5種目以外は保存しない
+    if (!state.records.events[ev]) continue;
 
     const ranked = er.type === "withFinal" ? (er.final ?? []) : (er.overall ?? []);
     for (const x of ranked) {
@@ -152,18 +149,16 @@ function updateRecordsFromEkiden(state, result) {
   const my = (result.ranking ?? []).find(x => x.isPlayer);
   if (!my) return;
 
-  // 総合
   state.records.ekidenTotal = pushTop10(
     state.records.ekidenTotal,
     { totalSec: my.totalSec, totalText: my.totalText, when: result.when },
     "totalSec"
   );
 
-  // 区間
   for (const leg of (my.legs ?? [])) {
     const key = String(leg.leg);
     const entry = {
-      athleteId: leg.athleteId ?? leg.athleteName, // meet_ekiden.jsがid持ってないので名前fallback
+      athleteId: leg.athleteId ?? leg.athleteName,
       athleteName: leg.athleteName,
       timeSec: leg.timeSec,
       timeText: leg.timeText,
@@ -186,19 +181,15 @@ function buildSoutaiRivalsWithCarry(state, stageKey) {
   const baseNames = new Set(base.map(s => s.name));
   const myName = state.teamName;
 
-  // carry選手を「所属校名」ごとにまとめる（自校名は除外）
-  const bySchool = new Map(); // schoolName -> athletes[]
+  const bySchool = new Map();
   for (const c of carry) {
     const schoolName = c.schoolName ?? "不明校";
-
-    // ★自校名と同じcarryは混ぜない（重複/増殖の原因）
     if (schoolName === myName) continue;
 
     if (!bySchool.has(schoolName)) bySchool.set(schoolName, []);
     bySchool.get(schoolName).push(c.athlete);
   }
 
-  // 所属校名ごとに“仮想校”を追加（同名があれば合流）
   for (const [schoolName, athletes] of bySchool.entries()) {
     if (baseNames.has(schoolName)) {
       const s = base.find(x => x.name === schoolName);
@@ -217,7 +208,6 @@ function buildSoutaiRivalsWithCarry(state, stageKey) {
   return base;
 }
 
-// 駅伝：top5Teams の team（学校オブジェクト）を追加（重複除外）
 function buildEkidenRivalsWithCarry(state, stageKey) {
   ensureRivals(state);
   ensureCarry(state);
@@ -227,7 +217,6 @@ function buildEkidenRivalsWithCarry(state, stageKey) {
     .filter(x => x.toStage === stageKey)
     .map(x => x.team)
     .filter(Boolean)
-    // ★自校名と同名のチームは混ぜない
     .filter(t => t.name !== state.teamName);
 
   if (carryTeams.length === 0) return base;
@@ -237,7 +226,6 @@ function buildEkidenRivalsWithCarry(state, stageKey) {
   return base.concat(add);
 }
 
-// 県以降：前大会上位枠（自校分）を固定化して確認画面に出すための picks を作る
 function buildPlayerFixedSoutaiPicksFromCarry(state, stageKey) {
   ensureCarry(state);
   const src = (state.carry.soutai.next ?? [])
@@ -245,7 +233,6 @@ function buildPlayerFixedSoutaiPicksFromCarry(state, stageKey) {
   return src.map(x => ({ athlete: x.athlete, event: x.event }));
 }
 
-// 駅伝：出場条件チェック（地区以外は前大会5位以内が必要）
 function canEnterEkiden(state, stageKey) {
   ensureQualify(state);
   if (stageKey === "district") return true;
@@ -259,7 +246,7 @@ function renderEkidenNotQualified(state, stageKey) {
   app.innerHTML = `
     <div class="card">
       <h2>${stageTitleEkiden(stageKey)}</h2>
-      <p style="color:#b00;">出場条件を満たしていないため出場できません（前大会で5位���内が必要）。</p>
+      <p style="color:#b00;">出場条件を満たしていないため出場できません（前大会で5位以内が必要）。</p>
       <div class="row" style="margin-top:14px;">
         <button id="ok">OK（次の週へ）</button>
       </div>
@@ -281,9 +268,7 @@ function renderSoutaiNoEntries(state, stageKey) {
   document.querySelector("#ok").onclick = () => goNextWeek(state);
 }
 
-// --- 駅伝成績 → スカウト可能人数 ---
 function computeScoutMaxByEkiden(state) {
-  // 「出場しただけ」で段階更新
   ensureScout(state);
   const tier = state.scout.lastEkidenTier ?? "none";
   if (tier === "national_win") return 5;
@@ -291,6 +276,102 @@ function computeScoutMaxByEkiden(state) {
   if (tier === "region") return 3;
   if (tier === "prefecture") return 2;
   return 1;
+}
+
+// --- 記録表示画面 ---
+function renderRecords(state) {
+  ensureRecords(state);
+
+  const evOrder = [
+    { key: "800", label: "800m" },
+    { key: "1500", label: "1500m" },
+    { key: "3000sc", label: "3000mSC" },
+    { key: "5000", label: "5000m" },
+    { key: "5000w", label: "5000mW" },
+  ];
+
+  const eventBlocks = evOrder.map(ev => {
+    const list = state.records.events[ev.key] ?? [];
+    const rows = list.map((r, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${r.athleteName}</td>
+        <td>${r.timeText}</td>
+        <td style="color:#777;">${r.when}</td>
+      </tr>
+    `).join("") || `<tr><td colspan="4" style="color:#777;">記録なし</td></tr>`;
+
+    return `
+      <h3 style="margin-top:14px;">${ev.label} 歴代トップ10（自校）</h3>
+      <div style="overflow:auto;">
+        <table style="width:100%; border-collapse:collapse; min-width:520px;">
+          <thead>
+            <tr><th>順位</th><th>選手</th><th>タイム</th><th>日時</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  }).join("");
+
+  const legBlocks = [1,2,3,4,5,6,7].map(leg => {
+    const list = state.records.ekidenLegs[String(leg)] ?? [];
+    const rows = list.map((r, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${r.athleteName}</td>
+        <td>${r.timeText}</td>
+        <td style="color:#777;">${r.when}</td>
+      </tr>
+    `).join("") || `<tr><td colspan="4" style="color:#777;">記録なし</td></tr>`;
+
+    return `
+      <h3 style="margin-top:14px;">駅伝 ${leg}区 歴代トップ10（自校）</h3>
+      <div style="overflow:auto;">
+        <table style="width:100%; border-collapse:collapse; min-width:520px;">
+          <thead>
+            <tr><th>順位</th><th>選手</th><th>タイム</th><th>日時</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  }).join("");
+
+  const totalRows = (state.records.ekidenTotal ?? []).map((r, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${r.totalText}</td>
+      <td style="color:#777;">${r.when}</td>
+    </tr>
+  `).join("") || `<tr><td colspan="3" style="color:#777;">記録なし</td></tr>`;
+
+  app.innerHTML = `
+    <div class="card">
+      <h2>自チーム 歴代記録</h2>
+
+      ${eventBlocks}
+
+      <h2 style="margin-top:18px;">駅伝記録</h2>
+      ${legBlocks}
+
+      <h3 style="margin-top:14px;">駅伝 総合タイム 歴代トップ10（自校）</h3>
+      <div style="overflow:auto;">
+        <table style="width:100%; border-collapse:collapse; min-width:420px;">
+          <thead>
+            <tr><th>順位</th><th>総合タイム</th><th>日時</th></tr>
+          </thead>
+          <tbody>${totalRows}</tbody>
+        </table>
+      </div>
+
+      <div class="row" style="margin-top:14px;">
+        <button class="secondary" id="back">戻る</button>
+      </div>
+    </div>
+  `;
+
+  document.querySelector("#back").onclick = () => renderHome(state);
 }
 
 // --- 3月4週：設備を1つ選んでLv+1 → スカウト → 年度更新 → 次週へ ---
@@ -335,10 +416,8 @@ function renderFacilityUpgradeChoice(state) {
 function renderScout(state) {
   ensureScout(state);
 
-  // max決定（その年の駅伝成績による）
   state.scout.max = computeScoutMaxByEkiden(state);
 
-  // 10人生成（同一年度で何度も開いたときは再生成しない）
   if (!state.scout.pool || state.scout.pool.length !== 10) {
     state.scout.pool = Array.from({ length: 10 }, (_, i) => createScoutFreshman(i));
     state.scout.selected = [];
@@ -397,9 +476,7 @@ function renderScout(state) {
   };
 
   app.querySelectorAll("input[data-scout]").forEach(cb => {
-    cb.onchange = () => {
-      updateCount();
-    };
+    cb.onchange = () => updateCount();
   });
   updateCount();
 
@@ -420,7 +497,6 @@ function renderScout(state) {
     state.scout.selected = selectedIdx.map(i => state.scout.pool[i]);
     saveGame(state);
 
-    // 年度更新→次週へ
     runYearUpdate(state);
     advanceWeek(state);
     state.lastTraining = null;
@@ -461,7 +537,6 @@ function renderTitle() {
       </div>
 
       <p style="margin-top:12px;color:#555;">端末内（ブラウザ）に自動でセーブされます。</p>
-      <p style="margin-top:8px;color:#b00;">※大きく仕様変更したので、最初は「セーブ削除」を推奨します。</p>
     </div>
   `;
 
@@ -533,6 +608,7 @@ function renderHome(state) {
       <div class="row" style="margin-top:12px;">
         <button id="athletes">選手</button>
         <button id="facilities">設備</button>
+        <button id="records">記録</button>
         <button id="rename">学校名変更</button>
         <button id="help">ヘルプ</button>
         <button class="secondary" id="back">タイトルへ</button>
@@ -542,6 +618,7 @@ function renderHome(state) {
 
   document.querySelector("#athletes").onclick = () => renderAthletes(state);
   document.querySelector("#facilities").onclick = () => renderFacilities(state);
+  document.querySelector("#records").onclick = () => renderRecords(state);
   document.querySelector("#rename").onclick = () => renderRenameTeam(state);
   document.querySelector("#help").onclick = () => renderHelp(state);
   document.querySelector("#back").onclick = () => renderTitle();
@@ -558,7 +635,6 @@ function renderHome(state) {
       ensureRecords(state);
 
       rivalsWeeklyTraining(state);
-
       applyTraining(state, id);
 
       const meet = getMeetOfWeek(state);
@@ -574,7 +650,6 @@ function renderHome(state) {
           onCancel: () => renderHome(state),
           onConfirm: (picks) => {
             const result = runRecordMeet(state, picks);
-            // ★記録会は歴代保存しない（要件：5種目+駅伝のみ）
             saveGame(state);
             renderRecordResult(state, result);
           }
@@ -589,7 +664,6 @@ function renderHome(state) {
         const readOnly = meet.stage !== "district";
         const fixedPicks = readOnly ? buildPlayerFixedSoutaiPicksFromCarry(state, meet.stage) : null;
 
-        // ★県以降で枠が0ならスキップ
         if (readOnly && (!fixedPicks || fixedPicks.length === 0)) {
           state.rivals[meet.stage] = original;
           renderSoutaiNoEntries(state, meet.stage);
@@ -609,10 +683,9 @@ function renderHome(state) {
             const submit = readOnly ? (fixedPicks ?? []) : picks;
             const result = runSoutai(state, meet.stage, submit, null);
 
-            // 次大会に混ぜる“上位選手（全校分）”を保存
             state.carry.soutai.next = result.carryCandidates ?? [];
 
-            // ★歴代更新（5種目のみ）
+            // ★歴代保存（5種目）
             updateRecordsFromSoutai(state, result);
 
             state.rivals[meet.stage] = original;
@@ -641,13 +714,11 @@ function renderHome(state) {
           onConfirm: (picks) => {
             const result = runEkiden(state, meet.stage, picks);
 
-            // 通過フラグ更新（次ステージの出場条件）
             ensureQualify(state);
             if (meet.stage === "district") state.qualify.ekiden.prefecture = !!result.cleared;
             if (meet.stage === "prefecture") state.qualify.ekiden.region = !!result.cleared;
             if (meet.stage === "region") state.qualify.ekiden.national = !!result.cleared;
 
-            // ★その年の駅伝成績（出場しただけで段階更新）
             ensureScout(state);
             if (meet.stage === "prefecture") state.scout.lastEkidenTier = "prefecture";
             if (meet.stage === "region") state.scout.lastEkidenTier = "region";
@@ -655,10 +726,9 @@ function renderHome(state) {
               state.scout.lastEkidenTier = (result.myRank === 1) ? "national_win" : "national";
             }
 
-            // 次大会に混ぜる“上位5校（学校オブジェクト）”を保存
             state.carry.ekiden.next = result.top5Teams ?? [];
 
-            // ★歴代更新（区間＋総合）
+            // ★歴代保存（区間＋総合）
             updateRecordsFromEkiden(state, result);
 
             state.rivals[meet.stage] = original;
@@ -801,7 +871,6 @@ function renderHelp(state) {
   `;
   document.querySelector("#back").onclick = () => renderHome(state);
 }
-
 function renderFacilities(state) {
   ensureFacilities(state);
   const f = state.facilities;
@@ -907,7 +976,6 @@ function renderSoutaiResult(state, result) {
   saveGame(state);
 
   const evOrder = ["800", "1500", "3000sc", "5000", "5000w"];
-
   const sections = evOrder.map(ev => {
     const er = result.events[ev];
     if (!er) return "";
@@ -924,69 +992,8 @@ function renderSoutaiResult(state, result) {
       </tr>
     `).join("");
 
-    let myRows = "";
-
-    if (er.type === "withFinal") {
-      const finalList = er.final ?? [];
-      const heats = er.heats ?? [];
-
-      const finalists = finalList
-        .map((x, i) => ({ ...x, rank: i + 1 }))
-        .filter(x => x.isPlayer);
-
-      const heatPlayers = [];
-      for (const h of heats) {
-        for (let i = 0; i < (h.results ?? []).length; i++) {
-          const x = h.results[i];
-          if (!x.isPlayer) continue;
-          heatPlayers.push({
-            ...x,
-            heat: h.heat,
-            heatRank: i + 1,
-          });
-        }
-      }
-
-      if (finalists.length > 0) {
-        myRows = finalists.map(x => `
-          <tr>
-            <td>${x.rank}</td>
-            <td>${x.athlete.name}</td>
-            <td>${x.timeText}</td>
-            <td>決勝</td>
-          </tr>
-        `).join("");
-      } else if (heatPlayers.length > 0) {
-        myRows = heatPlayers.map(x => `
-          <tr>
-            <td>—</td>
-            <td>${x.athlete.name}</td>
-            <td>${x.timeText}</td>
-            <td>予選敗退（${x.heat}組${x.heatRank}着）</td>
-          </tr>
-        `).join("");
-      } else {
-        myRows = `<tr><td colspan="4">自校選手なし</td></tr>`;
-      }
-    } else {
-      const overallList = er.overall ?? [];
-      const mine = overallList
-        .map((x, i) => ({ ...x, rank: i + 1 }))
-        .filter(x => x.isPlayer);
-
-      myRows = mine.map(x => `
-        <tr>
-          <td>${x.rank}</td>
-          <td>${x.athlete.name}</td>
-          <td>${x.timeText}</td>
-          <td>—</td>
-        </tr>
-      `).join("") || `<tr><td colspan="4">自校選手なし</td></tr>`;
-    }
-
     return `
       <h3 style="margin-top:14px;">${eventLabel(ev)}</h3>
-
       <h4 style="margin:10px 0 6px 0;">全体（上位10）</h4>
       <div style="overflow:auto;">
         <table style="width:100%; border-collapse:collapse; min-width:560px;">
@@ -994,16 +1001,6 @@ function renderSoutaiResult(state, result) {
             <tr><th>順位</th><th>学校</th><th></th><th>選手</th><th>タイム</th></tr>
           </thead>
           <tbody>${top}</tbody>
-        </table>
-      </div>
-
-      <h4 style="margin:10px 0 6px 0;">自校選手</h4>
-      <div style="overflow:auto;">
-        <table style="width:100%; border-collapse:collapse; min-width:520px;">
-          <thead>
-            <tr><th>全体順位</th><th>選手</th><th>タイム</th><th>備考</th></tr>
-          </thead>
-          <tbody>${myRows}</tbody>
         </table>
       </div>
     `;
@@ -1119,11 +1116,9 @@ function runYearUpdate(state) {
 
   ensureFacilities(state);
 
-  // 新年度なので駅伝通過条件はリセット
   ensureQualify(state);
   state.qualify.ekiden = { prefecture: false, region: false, national: false };
 
-  // スカウトの「その年の成績」もリセット（次年度はまた積む）
   ensureScout(state);
   state.scout.lastEkidenTier = "none";
 }
