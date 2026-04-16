@@ -102,6 +102,11 @@ function renderSoutaiPicker(app, state, { allowedEvents = null, allowedPairs = n
 
   function canAdd(a, ev) {
     if (!events.includes(ev)) return false;
+        // ★追加：勝ち抜けペア制限（県/地域/全国）
+    if (allowedPairs) {
+      const ok = allowedPairs.some(p => p.athleteId === a.id && p.event === ev);
+      if (!ok) return false;
+    }
     if (countByEvent(ev) >= 3) return false;
     if (countByAthlete(a) >= 2) return false;
     if (picks.some(p => p.athlete === a && p.event === ev)) return false;
@@ -116,7 +121,12 @@ function renderSoutaiPicker(app, state, { allowedEvents = null, allowedPairs = n
   function applyRecommended() {
     picks.splice(0, picks.length);
     const rec = recommendSoutaiPicks(state.athletes, events);
-    for (const r of rec) picks.push(r);
+
+    const filtered = allowedPairs
+      ? rec.filter(r => allowedPairs.some(p => p.athleteId === r.athlete.id && p.event === r.event))
+      : rec;
+
+    for (const r of filtered) picks.push(r);
   }
 
   function draw() {
