@@ -17,6 +17,10 @@ function runTeamTime(teamPicks) {
     return {
       leg: x.leg,
       event: x.event,
+
+      // ★追加：区間記録の重複排除に使う
+      athleteId: x.athlete?.id ?? null,
+
       athleteName: x.athlete.name,
       timeSec: t,
       timeText: formatTime(t, 1),
@@ -41,11 +45,9 @@ function nextStageKey(stageKey) {
 // legごとに「区間順位」「累積順位」を計算して返す
 function buildSplits(rankedTeams) {
   // rankedTeams: [{school,isPlayer,legs:[{leg,timeSec...}], ...}]
-  const splits = []; // [{leg,event,rows:[{rank,school,isPlayer,legTimeText,totalText}]}]
+  const splits = [];
 
-  // 1〜7区を前提（legs配列も7）
   for (let leg = 1; leg <= 7; leg++) {
-    // この区間までの累積
     const withCum = rankedTeams.map(team => {
       const cum = team.legs
         .filter(x => x.leg <= leg)
@@ -84,7 +86,7 @@ function buildSplits(rankedTeams) {
     }
 
     const rows = Array.from(map.values())
-      .sort((a, b) => a.cumRank - b.cumRank) // 表示は累積順位順が見やすい
+      .sort((a, b) => a.cumRank - b.cumRank)
       .map(x => ({
         school: x.school,
         isPlayer: x.isPlayer,
@@ -132,7 +134,7 @@ export function runEkiden(state, stageKey, playerPicks) {
     when: `${state.month}月${state.week}週`,
     ranking: ranked,
 
-    // ★追加：区間ごとの順位（区間順位＆累積順位）
+    // ��間ごとの順位（区間順位＆累積順位）
     splits: buildSplits(ranked),
 
     // 次大会へ持ち越す上位5チーム（学校オブジェクトを保持）
