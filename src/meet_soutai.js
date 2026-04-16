@@ -176,16 +176,30 @@ export function runSoutai(state, stageKey, playerPickedEntries, allowedEvents = 
   if (!allowedEvents || allowedEvents.includes("5000")) result.events["5000"] = run5000like(byEvent["5000"], "5000");
   if (!allowedEvents || allowedEvents.includes("5000w")) result.events["5000w"] = run5000like(byEvent["5000w"], "5000w");
 
-  // 通過判定（全国は通過不要）
+   // 通過判定（全国は通過不要）
+  result.qualifiedPairs = []; // [{athleteId, event}]
   if (stageKey !== "national") {
     for (const ev of EVENTS_MEET) {
       if (allowedEvents && !allowedEvents.includes(ev)) continue;
       const er = result.events[ev];
       if (!er) continue;
 
-      const ranks = getPlayerRanks(er);
-      const best = ranks.length ? Math.min(...ranks) : null;
-      if (best !== null && best <= result.threshold) {
+      // この種目で通過した「選手」を特定する（順位しきい値以内）
+      let ranked = [];
+      if (er.type === "withFinal") ranked = er.final;
+      else ranked = er.overall;
+
+      for (let i = 0; i < ranked.length; i++) {
+        const x = ranked[i];
+        const rank = i + 1;
+        if (!x.isPlayer) continue;
+        if (rank <= result.threshold) {
+          result.qualifiedPairs.push({ athleteId: x.athlete.id, event: ev });
+        }
+      }
+
+      // 参考表示用に種目一覧も残す
+      if (result.qualifiedPairs.some(p => p.event === ev)) {
         result.qualifiedEvents.push(ev);
       }
     }
@@ -193,7 +207,6 @@ export function runSoutai(state, stageKey, playerPickedEntries, allowedEvents = 
 
   state.lastMeetResult = result;
   return result;
-}
 
 function stageTitle(key) {
   if (key === "district") return "地区総体";
