@@ -16,7 +16,7 @@ function getMeetOfWeek(state) {
   if (state.month === 9 && state.week === 3) return { type: "record" };
   if (state.month === 3 && state.week === 3) return { type: "record" };
 
-  // 総体：5月1週�� 地区、5月4週後 県、6月3週後 地域、7月4週後 全国
+  // 総体：5月1週後 地区、5月4週後 県、6月3週後 地域、7月4週後 全国
   if (state.month === 5 && state.week === 1) return { type: "soutai", stage: "district" };
   if (state.month === 5 && state.week === 4) return { type: "soutai", stage: "prefecture" };
   if (state.month === 6 && state.week === 3) return { type: "soutai", stage: "region" };
@@ -44,6 +44,39 @@ function advanceWeek(state) {
   }
 }
 
+// --- qualify（通過管理）初期化/救済 ---
+function ensureQualify(state) {
+  state.qualify ??= {
+    soutai: { prefecturePairs: [], regionPairs: [], nationalPairs: [] },
+    ekiden: { prefecture: false, region: false, national: false },
+  };
+
+  // 旧形式救済（prefecture/region/national が配列だった場合）
+  if (state.qualify.soutai && ("prefecture" in state.qualify.soutai)) {
+    state.qualify = {
+      soutai: { prefecturePairs: [], regionPairs: [], nationalPairs: [] },
+      ekiden: state.qualify.ekiden ?? { prefecture: false, region: false, national: false },
+    };
+  }
+}
+
+function getAllowedSoutaiPairsForStage(state, stage) {
+  ensureQualify(state);
+
+  if (stage === "district") return null;
+  if (stage === "prefecture") return state.qualify.soutai.prefecturePairs;
+  if (stage === "region") return state.qualify.soutai.regionPairs;
+  if (stage === "national") return state.qualify.soutai.nationalPairs;
+  return null;
+}
+
+function pairsToEvents(pairs) {
+  if (!pairs) return null;
+  const set = new Set(pairs.map(p => p.event));
+  return Array.from(set);
+}
+
+// --- 画面 ---
 function renderTitle() {
   const hasSave = !!loadGame();
 
@@ -67,11 +100,7 @@ function renderTitle() {
   document.querySelector("#new").onclick = () => {
     const state = createNewGameState();
     ensureRivals(state);
-    // 通過管理
-    state.qualify = {
-      soutai: { prefecture: [], region: [], national: [] },
-      ekiden: { prefecture: false, region: false, national: false },
-    };
+    ensureQualify(state);
     saveGame(state);
     renderHome(state);
   };
@@ -80,11 +109,7 @@ function renderTitle() {
     const state = loadGame();
     if (state) {
       ensureRivals(state);
-      // 旧セーブ救済（無ければ作る）
-      state.qualify ??= {
-        soutai: { prefecture: [], region: [], national: [] },
-        ekiden: { prefecture: false, region: false, national: false },
-      };
+      ensureQualify(state);
       saveGame(state);
       renderHome(state);
     }
@@ -147,6 +172,7 @@ function renderHome(state) {
       const id = b.getAttribute("data-tr");
 
       ensureRivals(state);
+      ensureQualify(state);
 
       // 裏練習（相手校）
       rivalsWeeklyTraining(state);
@@ -159,7 +185,6 @@ function renderHome(state) {
       saveGame(state);
 
       if (!meet) {
-        // 大会なし：次週へ
         goNextWeek(state);
         return;
       }
@@ -177,24 +202,27 @@ function renderHome(state) {
       }
 
       if (meet.type === "soutai") {
-        const allowed = getAllowedSoutaiEventsForStage(state, meet.stage);
-          // ★追加：通過種目が0なら出場不可
-        if (Array.isArray(allowed) && allowed.length === 0) {
+        const allowedPairs = getAllowedSoutaiPairsForStage(state, meet.stage);
+        const allowedEvents = pairsToEvents(allowedPairs);
+
+        // district以外：通過者が0なら出場不可
+        if (Array.isArray(allowedPairs) && allowedPairs.length === 0) {
           renderSimpleMessage(
             state,
-            `${stageTitleSoutai(meet.stage)}：出場できる種目がありません（前大会で通過なし）`,
+            `${stageTitleSoutai(meet.stage)}：出場できる選手がいません（前大会で通過なし）`,
             "OK（次の週へ）",
             () => goNextWeek(state)
           );
           return;
-       }
+        }
 
         renderPicker(app, "soutai", state, {
-          allowedEvents: allowed,
+          allowedEvents: allowedEvents,
+          allowedPairs: allowedPairs,
           onCancel: () => renderHome(state),
           onConfirm: (picks) => {
-            const result = runSoutai(state, meet.stage, picks, allowed);
-            saveSoutaiQualification(state, meet.stage, result);
+            const result = runSoutai(state, meet.stage, picks, allowedEvents);
+            saveSoutaiQualificationPairs(state, meet.stage, result);
             saveGame(state);
             renderSoutaiResult(state, result);
           }
@@ -203,12 +231,16 @@ function renderHome(state) {
       }
 
       if (meet.type === "ekiden") {
-        // 通過してないのに上位大会週が来た場合は「出場不可」扱い（仕様の条件）
         if (!canEnterEkidenStage(state, meet.stage)) {
           saveGame(state);
-          renderSimpleMessage(state, `${stageTitleEkiden(meet.stage)}：出場条件を満たしていません`, "ホームへ", () => renderHome(state));
+          renderSimpleMessage(
+            state,
+            `${stageTitleEkiden(meet.stage)}：出場条件を満たしていません`,
+            "OK（次の週へ）",
+            () => goNextWeek(state)
+          );
           return;
-      }
+        }
 
         renderPicker(app, "ekiden", state, {
           onCancel: () => renderHome(state),
@@ -226,11 +258,10 @@ function renderHome(state) {
 }
 
 function goNextWeek(state) {
-  // 年度更新は「3月4週の処理が終わった後」に実行してから次週へ
+  // 年度更新は「3月4週の処理が終わった後」
   if (isYearUpdateWeek(state)) runYearUpdate(state);
 
   advanceWeek(state);
-  // 次週に向けて
   state.lastTraining = null;
   saveGame(state);
   renderHome(state);
@@ -275,34 +306,19 @@ function renderAthletes(state) {
   document.querySelector("#home").onclick = () => renderHome(state);
 }
 
-// --- 条件（通過管理） ---
-function saveSoutaiQualification(state, stage, result) {
-  state.qualify ??= { soutai: { prefecture: [], region: [], national: [] }, ekiden: { prefecture: false, region: false, national: false } };
+// --- 条件（通過管理：総体はペアで管理） ---
+function saveSoutaiQualificationPairs(state, stage, result) {
+  ensureQualify(state);
 
-  if (stage === "district") {
-    // 地区→県：通過した種目だけ県に持っていく
-    state.qualify.soutai.prefecture = result.qualifiedEvents ?? [];
-  }
-  if (stage === "prefecture") {
-    state.qualify.soutai.region = result.qualifiedEvents ?? [];
-  }
-  if (stage === "region") {
-    state.qualify.soutai.national = result.qualifiedEvents ?? [];
-  }
-}
+  const pairs = result.qualifiedPairs ?? [];
 
-function getAllowedSoutaiEventsForStage(state, stage) {
-  state.qualify ??= { soutai: { prefecture: [], region: [], national: [] }, ekiden: { prefecture: false, region: false, national: false } };
-
-  if (stage === "district") return null; // 全種目可
-  if (stage === "prefecture") return state.qualify.soutai.prefecture.length ? state.qualify.soutai.prefecture : []; // 空なら出場不可
-  if (stage === "region") return state.qualify.soutai.region.length ? state.qualify.soutai.region : [];
-  if (stage === "national") return state.qualify.soutai.national.length ? state.qualify.soutai.national : [];
-  return null;
+  if (stage === "district") state.qualify.soutai.prefecturePairs = pairs;
+  if (stage === "prefecture") state.qualify.soutai.regionPairs = pairs;
+  if (stage === "region") state.qualify.soutai.nationalPairs = pairs;
 }
 
 function saveEkidenQualification(state, stage, result) {
-  state.qualify ??= { soutai: { prefecture: [], region: [], national: [] }, ekiden: { prefecture: false, region: false, national: false } };
+  ensureQualify(state);
 
   if (stage === "district") state.qualify.ekiden.prefecture = !!result.cleared;
   if (stage === "prefecture") state.qualify.ekiden.region = !!result.cleared;
@@ -310,7 +326,7 @@ function saveEkidenQualification(state, stage, result) {
 }
 
 function canEnterEkidenStage(state, stage) {
-  state.qualify ??= { soutai: { prefecture: [], region: [], national: [] }, ekiden: { prefecture: false, region: false, national: false } };
+  ensureQualify(state);
   if (stage === "district") return true;
   if (stage === "prefecture") return !!state.qualify.ekiden.prefecture;
   if (stage === "region") return !!state.qualify.ekiden.region;
@@ -525,9 +541,9 @@ function runYearUpdate(state) {
   // 相手校も年度更新
   rivalsYearUpdate(state);
 
-  // 通過情報は翌年にリセット
+  // 通過情報は翌年にリセット（ペア形式）
   state.qualify = {
-    soutai: { prefecture: [], region: [], national: [] },
+    soutai: { prefecturePairs: [], regionPairs: [], nationalPairs: [] },
     ekiden: { prefecture: false, region: false, national: false },
   };
 }
@@ -544,7 +560,7 @@ function stageTitleEkiden(key) {
   if (key === "district") return "地区駅伝";
   if (key === "prefecture") return "県駅伝";
   if (key === "region") return "地域駅伝";
-  if (key === "national") return "全国駅伝";
+  if (key === "national") return "全国駅��";
   return "駅伝";
 }
 function eventLabel(ev) {
