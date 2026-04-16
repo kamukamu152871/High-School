@@ -48,7 +48,7 @@ function advanceWeek(state) {
   }
 }
 
-// --- 旧：通過管理（互換のため残す） ---
+// --- 旧：通過管理（駅伝条件チェックに使う） ---
 function ensureQualify(state) {
   state.qualify ??= {
     soutai: { prefecturePairs: [], regionPairs: [], nationalPairs: [] },
@@ -139,8 +139,79 @@ function buildPlayerFixedSoutaiPicksFromCarry(state, stageKey) {
   return src.map(x => ({ athlete: x.athlete, event: x.event }));
 }
 
+// ★駅伝：出場条件チェック（地区以外は前大会5位以内が必要）
+function canEnterEkiden(state, stageKey) {
+  ensureQualify(state);
+  if (stageKey === "district") return true;
+  if (stageKey === "prefecture") return !!state.qualify.ekiden.prefecture;
+  if (stageKey === "region") return !!state.qualify.ekiden.region;
+  if (stageKey === "national") return !!state.qualify.ekiden.national;
+  return false;
+}
+
+function renderEkidenNotQualified(state, stageKey) {
+  app.innerHTML = `
+    <div class="card">
+      <h2>${stageTitleEkiden(stageKey)}</h2>
+      <p style="color:#b00;">出場条件を満たしていないため出場できません（前大会で5位以内が必要）。</p>
+      <div class="row" style="margin-top:14px;">
+        <button id="ok">OK（次の週へ）</button>
+      </div>
+    </div>
+  `;
+  document.querySelector("#ok").onclick = () => goNextWeek(state);
+}
+
+// ★3月4週：設備を1つ選んでLv+1してから年度更新→次週へ
+function renderFacilityUpgradeChoice(state) {
+  ensureFacilities(state);
+
+  const items = [
+    { key: "nagashi", label: "流し" },
+    { key: "tt", label: "TT" },
+    { key: "jog", label: "ジョグ" },
+    { key: "interval", label: "インターバル" },
+    { key: "circuit", label: "サーキット" },
+  ];
+
+  const rows = items.map(x => `
+    <div style="border:1px solid #eee; border-radius:10px; padding:10px; margin-top:10px;">
+      <div style="font-weight:800;">${x.label}（現在 Lv ${state.facilities[x.key]}）</div>
+      <button data-up="${x.key}" style="margin-top:8px;">この設備をLv+1</button>
+    </div>
+  `).join("");
+
+  app.innerHTML = `
+    <div class="card">
+      <h2>年度更新前：設備強化</h2>
+      <p style="color:#555;">3月4週目は、設備を1つだけ強化できます（Lv+1）。</p>
+      ${rows}
+      <p style="color:#b00; margin-top:10px;">※選んだら年度更新（引退/進級/新入生）が行われ、次の週へ進みます。</p>
+    </div>
+  `;
+
+  app.querySelectorAll("button[data-up]").forEach(b => {
+    b.onclick = () => {
+      const key = b.getAttribute("data-up");
+      state.facilities[key] = Math.min(4, (state.facilities[key] ?? 1) + 1);
+
+      // 年度更新→次週へ
+      runYearUpdate(state);
+      advanceWeek(state);
+      state.lastTraining = null;
+      saveGame(state);
+      renderHome(state);
+    };
+  });
+}
+
 function goNextWeek(state) {
-  if (isYearUpdateWeek(state)) runYearUpdate(state);
+  // ★3月4週は設備強化選択へ
+  if (isYearUpdateWeek(state)) {
+    renderFacilityUpgradeChoice(state);
+    return;
+  }
+
   advanceWeek(state);
   state.lastTraining = null;
   saveGame(state);
@@ -214,7 +285,7 @@ function renderHome(state) {
     : "この週は大会なし";
 
   const yearText = isYearUpdateWeek(state)
-    ? "この週の最後に【年度更新（引退/進級/新入生）】があります"
+    ? "この週の最後に【年度更新（設備強化→引退/進級/新入生）】があります"
     : "";
 
   const trainingButtons = TRAININGS.map(t => `<button data-tr="${t.id}">${t.name}</button>`).join("");
@@ -256,7 +327,7 @@ function renderHome(state) {
       ensureFacilities(state);
       ensureCarry(state);
 
-      // 相手校は固定能力なので実質noop（互換のため呼んでOK）
+      // 相手校は固定能力なので実質noop
       rivalsWeeklyTraining(state);
 
       // 自校の練習
@@ -315,6 +386,12 @@ function renderHome(state) {
       }
 
       if (meet.type === "ekiden") {
+        // ★出場条件チェック（地区以外）
+        if (!canEnterEkiden(state, meet.stage)) {
+          renderEkidenNotQualified(state, meet.stage);
+          return;
+        }
+
         const original = state.rivals?.[meet.stage];
         state.rivals[meet.stage] = buildEkidenRivalsWithCarry(state, meet.stage);
 
@@ -325,6 +402,12 @@ function renderHome(state) {
           },
           onConfirm: (picks) => {
             const result = runEkiden(state, meet.stage, picks);
+
+            // ★通過フラグ更新（次ステージの出場条件）
+            ensureQualify(state);
+            if (meet.stage === "district") state.qualify.ekiden.prefecture = !!result.cleared;
+            if (meet.stage === "prefecture") state.qualify.ekiden.region = !!result.cleared;
+            if (meet.stage === "region") state.qualify.ekiden.national = !!result.cleared;
 
             // 次大会に混ぜる“上位5校（学校オブジェクト）”を保存
             state.carry.ekiden.next = result.top5Teams ?? [];
@@ -369,7 +452,6 @@ function renderRenameTeam(state) {
 }
 
 function renderHelp(state) {
-  // ヘルプ本文はここを編集してください
   app.innerHTML = `
     <div class="card">
       <h2>ヘルプ</h2>
@@ -378,7 +460,7 @@ function renderHelp(state) {
       <ul>
         <li>ホームで練習を選ぶ → 週が進みます。</li>
         <li>大会がある週は、練習後に出場確認/選出して大会を実行します。</li>
-        <li>結果を見たら「OK（���の週へ）」で進みます。</li>
+        <li>結果を見たら「OK（次の週へ）」で進みます。</li>
       </ul>
 
       <h3 style="margin-top:12px;">能力の種類</h3>
@@ -413,23 +495,25 @@ function renderHelp(state) {
 
       <h3 style="margin-top:12px;">総体：種目ごとの重要能力（目安）</h3>
       <ul>
-        <li>800m：主に <b>SPRINT</b> と <b>TOUGHNESS</b></li>
-        <li>1500m：主に <b>SPRINT</b> と <b>SPEED</b>（＋<b>STAMINA</b>）</li>
-        <li>3000mSC：主に <b>SPEED</b> と <b>STAMINA</b>（＋<b>TECHNIQUE</b>）</li>
-        <li>5000m：主に <b>SPEED</b> と <b>STAMINA</b>（＋<b>TOUGHNESS</b>）</li>
-        <li>5000mW：主に <b>TOUGHNESS</b> と <b>TECHNIQUE</b></li>
+        <li>800m：主に <b>SPRINT</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
+        <li>1500m：主に <b>SPRINT</b> と <b>SPEED</b>、さらに <b>STAMINA</b> も影響します。</li>
+        <li>3000mSC：主に <b>SPEED</b>・<b>STAMINA</b> に加えて、<b>TECHNIQUE</b> の影響が出やすいです。</li>
+        <li>5000m：主に <b>SPEED</b> と <b>STAMINA</b>、さらに <b>TOUGHNESS</b> も効きやすいです。</li>
+        <li>5000mW：主に <b>TOUGHNESS</b> と <b>TECHNIQUE</b> が重要になりやすいです。</li>
       </ul>
 
       <h3 style="margin-top:12px;">駅伝：区間ごとの重要能力（目安）</h3>
       <ul>
-        <li>1区 10000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b></li>
-        <li>2区 3000m：主に <b>SPRINT</b> と <b>SPEED</b>（＋<b>STAMINA</b>）</li>
-        <li>3区 8000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b></li>
-        <li>4区 8000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b></li>
-        <li>5区 3000m：主に <b>SPRINT</b> と <b>SPEED</b>（＋<b>STAMINA</b>）</li>
-        <li>6区 5000m：主に <b>SPEED</b> と <b>STAMINA</b>（＋<b>TOUGHNESS</b>）</li>
-        <li>7区 5000m：主に <b>SPEED</b> と <b>STAMINA</b>（＋<b>TOUGHNESS</b>）</li>
+        <li>1区 10000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
+        <li>2区 3000m：主に <b>SPRINT</b>・<b>SPEED</b> と <b>STAMINA</b> のバランスが効きやすいです。</li>
+        <li>3区 8000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
+        <li>4区 8000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
+        <li>5区 3000m：主に <b>SPRINT</b>・<b>SPEED</b> と <b>STAMINA</b> のバランスが効きやすいです。</li>
+        <li>6区 5000m：主に <b>SPEED</b> と <b>STAMINA</b> に加えて、<b>TOUGHNESS</b> も影響します。</li>
+        <li>7区 5000m：主に <b>SPEED</b> と <b>STAMINA</b> に加えて、<b>TOUGHNESS</b> も影響します。</li>
       </ul>
+
+      
 
       <div class="row" style="margin-top:14px;">
         <button class="secondary" id="back">戻る</button>
@@ -503,7 +587,7 @@ function renderAthletes(state) {
   document.querySelector("#home").onclick = () => renderHome(state);
 }
 
-// --- 結果画面（既存仕様） ---
+// --- 結果画面 ---
 function renderRecordResult(state, result) {
   const sections = ["1500", "3000", "5000"].map(ev => {
     const rows = result.playerOnly[ev].map(r => `
@@ -541,7 +625,7 @@ function renderRecordResult(state, result) {
 }
 
 function renderSoutaiResult(state, result) {
-  upgradeFacilityBySoutaiWinners(state, result);
+  // ★設備レベルアップ（総体優勝）条件は廃止
   saveGame(state);
 
   const evOrder = ["800", "1500", "3000sc", "5000", "5000w"];
@@ -562,7 +646,7 @@ function renderSoutaiResult(state, result) {
       </tr>
     `).join("");
 
-    // ★自校選手：予選落ちも表示する（備考列あり）
+    // 自校選手：予選落ちも表示する（備考列あり）
     let myRows = "";
 
     if (er.type === "withFinal") {
@@ -683,6 +767,34 @@ function renderEkidenResult(state, result) {
 
   const q = `自校順位：${result.myRank}位 / 通過：${result.cleared ? "YES" : "NO"}（5位以内）`;
 
+  // ★区間順位＆累積順位（上位5表示）
+  const splitBlocks = (result.splits ?? []).map(sp => {
+    const top5 = (sp.rows ?? []).slice(0, 5).map(r => `
+      <tr>
+        <td>${r.cumRank}</td>
+        <td>${r.school}</td>
+        <td>${r.isPlayer ? "自校" : ""}</td>
+        <td>${r.legRank}</td>
+        <td>${r.legTimeText}</td>
+        <td>${r.cumText}</td>
+      </tr>
+    `).join("");
+
+    return `
+      <h4 style="margin:10px 0 6px 0;">${sp.leg}区（${sp.event}m）時点（上位5）</h4>
+      <div style="overflow:auto;">
+        <table style="width:100%; border-collapse:collapse; min-width:720px;">
+          <thead>
+            <tr>
+              <th>累積順位</th><th>学校</th><th></th><th>区間順位</th><th>区間タイム</th><th>累積タイム</th>
+            </tr>
+          </thead>
+          <tbody>${top5}</tbody>
+        </table>
+      </div>
+    `;
+  }).join("");
+
   app.innerHTML = `
     <div class="card">
       <h2>${result.title} 結果</h2>
@@ -699,7 +811,7 @@ function renderEkidenResult(state, result) {
         </table>
       </div>
 
-      <h3 style="margin-top:14px;">自校区間タイ���</h3>
+      <h3 style="margin-top:14px;">自校区間タイム</h3>
       <div style="overflow:auto;">
         <table style="width:100%; border-collapse:collapse; min-width:520px;">
           <thead>
@@ -709,45 +821,15 @@ function renderEkidenResult(state, result) {
         </table>
       </div>
 
+      <h3 style="margin-top:14px;">各区の順位推移</h3>
+      ${splitBlocks}
+
       <div class="row" style="margin-top:14px;">
         <button id="ok">OK（次の週へ）</button>
       </div>
     </div>
   `;
   document.querySelector("#ok").onclick = () => goNextWeek(state);
-}
-
-// --- 設備アップ：総体の「優勝」で段階的に上げる ---
-function upgradeFacilityBySoutaiWinners(state, result) {
-  const targetLv =
-    result.stage === "district" ? 2 :
-    result.stage === "prefecture" ? 3 :
-    result.stage === "region" ? 4 : null;
-
-  if (!targetLv) return;
-
-  ensureFacilities(state);
-
-  const map = {
-    "800": "nagashi",
-    "1500": "tt",
-    "3000sc": "circuit",
-    "5000": "jog",
-    "5000w": "interval",
-  };
-
-  for (const [ev, facilityKey] of Object.entries(map)) {
-    const er = result.events?.[ev];
-    if (!er) continue;
-
-    const list = er.type === "withFinal" ? er.final : er.overall;
-    if (!list || list.length === 0) continue;
-
-    const winner = list[0];
-    if (winner.isPlayer) {
-      state.facilities[facilityKey] = Math.max(state.facilities[facilityKey], targetLv);
-    }
-  }
 }
 
 // --- 年度更新 ---
@@ -760,9 +842,13 @@ function runYearUpdate(state) {
   state.carry.ekiden.next = [];
 
   ensureFacilities(state);
+
+  // ★年度更新で駅伝通過条件もリセット（新年度はまた地区から）
+  ensureQualify(state);
+  state.qualify.ekiden = { prefecture: false, region: false, national: false };
 }
 
-// --- 表示ラベル ---
+// --- ラベル ---
 function stageTitleSoutai(key) {
   if (key === "district") return "地区総体";
   if (key === "prefecture") return "県総体";
