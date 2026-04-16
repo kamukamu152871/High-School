@@ -48,7 +48,7 @@ function advanceWeek(state) {
   }
 }
 
-// --- qualify（旧：通過管理）初期化/救済 ---
+// --- 旧：通過管理（互換のため残す） ---
 function ensureQualify(state) {
   state.qualify ??= {
     soutai: { prefecturePairs: [], regionPairs: [], nationalPairs: [] },
@@ -75,34 +75,17 @@ function ensureCarry(state) {
   state.carry.ekiden.next ??= [];
 }
 
-function getAllowedSoutaiPairsForStage(state, stage) {
-  // 旧仕様を一旦温存（現状は picker が参照している）
-  ensureQualify(state);
-  if (stage === "district") return null;
-  if (stage === "prefecture") return state.qualify.soutai.prefecturePairs;
-  if (stage === "region") return state.qualify.soutai.regionPairs;
-  if (stage === "national") return state.qualify.soutai.nationalPairs;
-  return null;
-}
-
-function pairsToEvents(pairs) {
-  if (!pairs) return null;
-  const set = new Set(pairs.map(p => p.event));
-  return Array.from(set);
-}
-
-// ---- carry を次大会の rivals に混ぜ込む（総体：混成校、駅伝：追加校） ----
+// ---- carry を次大会の rivals に混ぜ込む ----
+// 総体：carryCandidates（上位N選手）を「混成校」として追加
 function buildSoutaiRivalsWithCarry(state, stageKey) {
   ensureRivals(state);
   ensureCarry(state);
 
   const base = (state.rivals?.[stageKey] ?? []).slice();
-
-  // carryは「次のステージ宛」のものだけ混ぜる
   const carry = (state.carry.soutai.next ?? []).filter(x => x.toStage === stageKey);
   if (carry.length === 0) return base;
 
-  // 種目ごと上位に入った“選手”をまとめて混成校にする
+  // carry選手は「個人で混ざる」仕様なので混成校として扱う
   const mixed = {
     name: "持ち越し選手枠",
     facilityLevel: 1,
@@ -113,30 +96,31 @@ function buildSoutaiRivalsWithCarry(state, stageKey) {
   return base.concat([mixed]);
 }
 
+// 駅伝：top5Teams の team（学校オブジェクト）を追加（重複除外）
 function buildEkidenRivalsWithCarry(state, stageKey) {
   ensureRivals(state);
   ensureCarry(state);
 
   const base = (state.rivals?.[stageKey] ?? []).slice();
+  const carryTeams = (state.carry.ekiden.next ?? [])
+    .filter(x => x.toStage === stageKey)
+    .map(x => x.team)
+    .filter(Boolean);
 
-  const carry = (state.carry.ekiden.next ?? []).filter(x => x.toStage === stageKey);
-  if (carry.length === 0) return base;
+  if (carryTeams.length === 0) return base;
 
-  // carry校は「名前一致」で base に既に存在する可能性があるので重複除外
   const baseNames = new Set(base.map(s => s.name));
-  const add = carry
-    .map(x => x.schoolName)
-    .filter(n => !baseNames.has(n))
-    .map((n, i) => ({
-      name: n,
-      facilityLevel: 1,
-      groupKey: "carry_ekiden",
-      athletes: [], // 駅伝は recommendEkidenPicks が athletes を使うので、本来は学校実体が必要
-    }));
+  const add = carryTeams.filter(t => !baseNames.has(t.name));
 
-  // 注意：ここは「学校実体」が必要なので、次の段階で改善します。
-  // 今回は“carryが保存される”ところまでを目的にし、合成は次回完成させます。
   return base.concat(add);
+}
+
+function goNextWeek(state) {
+  if (isYearUpdateWeek(state)) runYearUpdate(state);
+  advanceWeek(state);
+  state.lastTraining = null;
+  saveGame(state);
+  renderHome(state);
 }
 
 // --- 画面 ---
@@ -233,7 +217,10 @@ function renderHome(state) {
       ensureFacilities(state);
       ensureCarry(state);
 
-      rivalsWeeklyTraining(state);   // 今は固定能力なので実質noop
+      // 相手校は固定能力なので実質noop（互換のため呼んでOK）
+      rivalsWeeklyTraining(state);
+
+      // 自校の練習
       applyTraining(state, id);
 
       const meet = getMeetOfWeek(state);
@@ -257,29 +244,26 @@ function renderHome(state) {
       }
 
       if (meet.type === "soutai") {
-        // carry混ぜ込み（この大会のステージに宛てられた carry を追加）
+        // ★carry混ぜ込み（次ステージ宛の上位選手を混成校として追加）
         const original = state.rivals?.[meet.stage];
-        const mixed = buildSoutaiRivalsWithCarry(state, meet.stage);
-        state.rivals[meet.stage] = mixed;
+        state.rivals[meet.stage] = buildSoutaiRivalsWithCarry(state, meet.stage);
 
-        const allowedPairs = getAllowedSoutaiPairsForStage(state, meet.stage);
-        const allowedEvents = pairsToEvents(allowedPairs);
+        // 県以降は本来「確認画面」だが、まずは readOnly モードで操作不可にする
+        const readOnly = meet.stage !== "district";
 
         renderPicker(app, "soutai", state, {
-          allowedEvents,
-          allowedPairs,
+          allowedEvents: null,
+          allowedPairs: null,
+          readOnly,
           onCancel: () => {
             state.rivals[meet.stage] = original;
             renderHome(state);
           },
           onConfirm: (picks) => {
-            const result = runSoutai(state, meet.stage, picks, allowedEvents);
+            const result = runSoutai(state, meet.stage, picks, null);
 
-            // ★新：carry保存（次大会へ混ぜる“選手”）
+            // ★新仕様：次大会に混ぜる“上位選手”を保存
             state.carry.soutai.next = result.carryCandidates ?? [];
-
-            // 旧：通過管理も一旦残す
-            saveSoutaiQualificationPairs(state, meet.stage, result);
 
             // 元に戻す
             state.rivals[meet.stage] = original;
@@ -292,16 +276,22 @@ function renderHome(state) {
       }
 
       if (meet.type === "ekiden") {
+        // ★carry混ぜ込み（次ステージ宛の上位5校を追加）
+        const original = state.rivals?.[meet.stage];
+        state.rivals[meet.stage] = buildEkidenRivalsWithCarry(state, meet.stage);
+
         renderPicker(app, "ekiden", state, {
-          onCancel: () => renderHome(state),
+          onCancel: () => {
+            state.rivals[meet.stage] = original;
+            renderHome(state);
+          },
           onConfirm: (picks) => {
             const result = runEkiden(state, meet.stage, picks);
 
-            // ★新：carry保存（次大会へ混ぜる“高校”）
+            // ★新仕様：次大会に混ぜる“上位5校（学校オブジェクト）”を保存
             state.carry.ekiden.next = result.top5Teams ?? [];
 
-            // 旧：自校通過フラグも一旦残す
-            saveEkidenQualification(state, meet.stage, result);
+            state.rivals[meet.stage] = original;
 
             saveGame(state);
             renderEkidenResult(state, result);
@@ -311,14 +301,6 @@ function renderHome(state) {
       }
     };
   });
-}
-
-function goNextWeek(state) {
-  if (isYearUpdateWeek(state)) runYearUpdate(state);
-  advanceWeek(state);
-  state.lastTraining = null;
-  saveGame(state);
-  renderHome(state);
 }
 
 function renderFacilities(state) {
@@ -383,22 +365,6 @@ function renderAthletes(state) {
     </div>
   `;
   document.querySelector("#home").onclick = () => renderHome(state);
-}
-
-// --- 条件（旧：通過管理） ---
-function saveSoutaiQualificationPairs(state, stage, result) {
-  ensureQualify(state);
-  const pairs = result.qualifiedPairs ?? [];
-  if (stage === "district") state.qualify.soutai.prefecturePairs = pairs;
-  if (stage === "prefecture") state.qualify.soutai.regionPairs = pairs;
-  if (stage === "region") state.qualify.soutai.nationalPairs = pairs;
-}
-
-function saveEkidenQualification(state, stage, result) {
-  ensureQualify(state);
-  if (stage === "district") state.qualify.ekiden.prefecture = !!result.cleared;
-  if (stage === "prefecture") state.qualify.ekiden.region = !!result.cleared;
-  if (stage === "region") state.qualify.ekiden.national = !!result.cleared;
 }
 
 // --- 設備アップ：総体の「優勝」で段階的に上げる ---
@@ -529,15 +495,10 @@ function renderSoutaiResult(state, result) {
     `;
   }).join("");
 
-  const q = (result.stage !== "national")
-    ? `通過種目：${(result.qualifiedEvents ?? []).map(eventLabel).join(" / ") || "なし"}（${result.threshold}位以内）`
-    : "全国は通過判定なし";
-
   app.innerHTML = `
     <div class="card">
       <h2>${result.title} 結果</h2>
       <p style="color:#555;">${result.when}</p>
-      <p style="color:#555;">${q}</p>
       ${sections}
       <div class="row" style="margin-top:14px;">
         <button id="ok">OK（次の週へ）</button>
@@ -603,27 +564,10 @@ function renderEkidenResult(state, result) {
   document.querySelector("#ok").onclick = () => goNextWeek(state);
 }
 
-function renderSimpleMessage(state, title, okText, okFn) {
-  app.innerHTML = `
-    <div class="card">
-      <h2>${title}</h2>
-      <div class="row" style="margin-top:14px;">
-        <button id="ok">${okText}</button>
-      </div>
-    </div>
-  `;
-  document.querySelector("#ok").onclick = okFn;
-}
-
 // --- 年度更新 ---
 function runYearUpdate(state) {
   applyYearUpdateToState(state);
   rivalsYearUpdate(state);
-
-  state.qualify = {
-    soutai: { prefecturePairs: [], regionPairs: [], nationalPairs: [] },
-    ekiden: { prefecture: false, region: false, national: false },
-  };
 
   // carryは翌年に持ち越さない（年度更新でリセット）
   ensureCarry(state);
