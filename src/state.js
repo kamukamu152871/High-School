@@ -137,3 +137,71 @@ export function loadGame() {
 export function clearSave() {
   localStorage.removeItem(SAVE_KEY);
 }
+// --- 追加export：年度更新を main.js から呼べるようにする ---
+export function createAthletePublic(grade, index) {
+  // 既存のcreateAthleteと同じ実装（内部関数があるのでそのまま呼べないため再定義）
+  const abilities = (function createAbilitiesByGradePublic(grade) {
+    const ranges = (function rangesByGradePublic(grade) {
+      if (grade === 1) return [[1, 20], [21, 40], [41, 50]];
+      if (grade === 2) return [[11, 30], [31, 50], [51, 60]];
+      return [[21, 40], [41, 60], [61, 70]];
+    })(grade);
+
+    const sampleByRangesPublic = (ranges) => {
+      const r = Math.random() * 100;
+      const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+      if (r < 45) return randInt(ranges[0][0], ranges[0][1]);
+      if (r < 95) return randInt(ranges[1][0], ranges[1][1]);
+      return randInt(ranges[2][0], ranges[2][1]);
+    };
+
+    return {
+      sprint: sampleByRangesPublic(ranges),
+      speed: sampleByRangesPublic(ranges),
+      stamina: sampleByRangesPublic(ranges),
+      toughness: sampleByRangesPublic(ranges),
+      technique: sampleByRangesPublic(ranges),
+    };
+  })(grade);
+
+  // 名前・性格は既存分布と一致
+  const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+  const choice = (arr) => arr[randInt(0, arr.length - 1)];
+  const name = `${choice(FAMILY_NAMES)} ${choice(GIVEN_NAMES)}`;
+
+  const personality = (() => {
+    const r = Math.random() * 100;
+    if (r < 16) return "たんき";
+    if (r < 32) return "せっかち";
+    if (r < 48) return "おおらか";
+    if (r < 64) return "がんこ";
+    if (r < 80) return "きよう";
+    if (r < 96) return "ふつう";
+    return "てんさい";
+  })();
+
+  const overall = Math.round(
+    (abilities.sprint + abilities.speed + abilities.stamina + abilities.toughness + abilities.technique) / 5
+  );
+
+  return {
+    id: `${grade}-${index}-${crypto.randomUUID?.() ?? Math.random()}`,
+    grade,
+    name,
+    personality,
+    abilities,
+    overall,
+  };
+}
+
+export function applyYearUpdateToState(state) {
+  // 3年引退→進級→新1年生5人（state.jsの分布で生成）
+  const survivors = state.athletes.filter(a => a.grade !== 3);
+  for (const a of survivors) a.grade += 1;
+
+  const freshmen = [];
+  for (let i = 0; i < 5; i++) freshmen.push(createAthletePublic(1, i));
+
+  state.athletes = freshmen.concat(survivors);
+  state.year += 1;
+}
