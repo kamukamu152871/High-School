@@ -84,12 +84,49 @@ function ensureScout(state) {
     pool: [],       // 3月4週に生成する10人
     selected: [],   // 選ばれたn人（翌4月加入）
     max: 1,         // 選べる人数
-    lastEkidenTier: "none", // その年の駅伝結果の段階（表示用）
+    lastEkidenTier: "none", // "none" | "prefecture" | "region" | "national" | "national_win"
   };
   state.scout.pool ??= [];
   state.scout.selected ??= [];
   state.scout.max ??= 1;
   state.scout.lastEkidenTier ??= "none";
+}
+
+function ensureRecords(state) {
+  state.records ??= {
+    // 5種目：event -> [{athleteId, athleteName, timeSec, timeText, when}]
+    events: {
+      "800": [],
+      "1500": [],
+      "3000sc": [],
+      "5000": [],
+      "5000w": [],
+    },
+    // 駅伝区間：leg(1-7) -> [{athleteId, athleteName, timeSec, timeText, when, event}]
+    ekidenLegs: {
+      "1": [],
+      "2": [],
+      "3": [],
+      "4": [],
+      "5": [],
+      "6": [],
+      "7": [],
+    },
+    // 駅伝総合：[{totalSec, totalText, when}]
+    ekidenTotal: [],
+  };
+
+  state.records.events ??= {};
+  for (const ev of ["800", "1500", "3000sc", "5000", "5000w"]) {
+    state.records.events[ev] ??= [];
+  }
+
+  state.records.ekidenLegs ??= {};
+  for (const leg of ["1", "2", "3", "4", "5", "6", "7"]) {
+    state.records.ekidenLegs[leg] ??= [];
+  }
+
+  state.records.ekidenTotal ??= [];
 }
 
 export function createNewGameState() {
@@ -127,16 +164,30 @@ export function createNewGameState() {
       ekiden: { next: [] },
     },
 
-    // ★追加：スカウト
+    // スカウト
     scout: {
       pool: [],
       selected: [],
       max: 1,
       lastEkidenTier: "none",
     },
+
+    // ★追加：歴代記録
+    records: {
+      events: {
+        "800": [],
+        "1500": [],
+        "3000sc": [],
+        "5000": [],
+        "5000w": [],
+      },
+      ekidenLegs: { "1": [], "2": [], "3": [], "4": [], "5": [], "6": [], "7": [] },
+      ekidenTotal: [],
+    },
   };
 
   ensureScout(state);
+  ensureRecords(state);
   return state;
 }
 
@@ -167,8 +218,11 @@ export function loadGame() {
     state.carry.soutai.next ??= [];
     state.carry.ekiden.next ??= [];
 
-    // ★新：スカウト救済
+    // スカウト救済
     ensureScout(state);
+
+    // ★歴代記録救済
+    ensureRecords(state);
 
     return state;
   } catch {
@@ -260,6 +314,7 @@ export function createScoutFreshman(index) {
 
 export function applyYearUpdateToState(state) {
   ensureScout(state);
+  ensureRecords(state);
 
   // 3年引退→進級
   const survivors = state.athletes.filter(a => a.grade !== 3);
