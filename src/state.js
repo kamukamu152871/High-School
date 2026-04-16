@@ -5,11 +5,9 @@ const SAVE_KEY = "hsr_save_v1";
 function randInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
-
 function choice(arr) {
   return arr[randInt(0, arr.length - 1)];
 }
-
 function createRandomName() {
   return `${choice(FAMILY_NAMES)} ${choice(GIVEN_NAMES)}`;
 }
@@ -26,18 +24,24 @@ function createPersonality() {
   return "てんさい";
 }
 
+// 1年生能力：
+// 45% -> 1-20, 50% -> 21-40, 5% -> 41-50
+function baseAbilityFreshman() {
+  const r = Math.random() * 100;
+  if (r < 45) return randInt(1, 20);
+  if (r < 95) return randInt(21, 40);
+  return randInt(41, 50);
+}
+
 function createAbilitiesByGrade(grade) {
-  // 1年:10-40, 2年:45-55, 3年:55-75
-  let min = 10, max = 40;
-  if (grade === 2) { min = 45; max = 55; }
-  if (grade === 3) { min = 55; max = 75; }
+  const add = grade === 1 ? 0 : grade === 2 ? 10 : 20;
 
   return {
-    sprint: randInt(min, max),
-    speed: randInt(min, max),
-    stamina: randInt(min, max),
-    toughness: randInt(min, max),
-    technique: randInt(min, max),
+    sprint: baseAbilityFreshman() + add,
+    speed: baseAbilityFreshman() + add,
+    stamina: baseAbilityFreshman() + add,
+    toughness: baseAbilityFreshman() + add,
+    technique: baseAbilityFreshman() + add,
   };
 }
 
@@ -65,7 +69,6 @@ function createAthlete(grade, index) {
 
 function createInitialAthletes() {
   const athletes = [];
-  // 各学年5人ずつ
   for (let i = 0; i < 5; i++) athletes.push(createAthlete(1, i));
   for (let i = 0; i < 5; i++) athletes.push(createAthlete(2, i));
   for (let i = 0; i < 5; i++) athletes.push(createAthlete(3, i));
@@ -80,10 +83,28 @@ export function createNewGameState() {
     teamName: "自校",
     athletes: createInitialAthletes(),
 
-    trainingDoneThisWeek: false,
+    // 設備レベル（練習ごとに1-4）
+    facilities: {
+      nagashi: 2,
+      tt: 2,
+      jog: 2,
+      interval: 2,
+      circuit: 2,
+    },
+
     lastTraining: null,
     lastMeetResult: null,
+
     rivals: null,
+    qualify: {
+      // 今後：厳密な通過（選手×種目）をここに入れる
+      soutai: {
+        prefecturePairs: [], // [{athleteId,event}]
+        regionPairs: [],
+        nationalPairs: [],
+      },
+      ekiden: { prefecture: false, region: false, national: false },
+    },
   };
 }
 
@@ -95,7 +116,18 @@ export function loadGame() {
   const raw = localStorage.getItem(SAVE_KEY);
   if (!raw) return null;
   try {
-    return JSON.parse(raw);
+    const state = JSON.parse(raw);
+
+    // 旧セーブ救済（施設）
+    state.facilities ??= { nagashi: 2, tt: 2, jog: 2, interval: 2, circuit: 2 };
+
+    // 旧セーブ救済（通過管理）
+    state.qualify ??= {
+      soutai: { prefecturePairs: [], regionPairs: [], nationalPairs: [] },
+      ekiden: { prefecture: false, region: false, national: false },
+    };
+
+    return state;
   } catch {
     return null;
   }
