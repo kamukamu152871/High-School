@@ -26,8 +26,15 @@ function runTeamTime(teamPicks) {
   return {
     legs,
     totalSec: total,
-    totalText: formatHMS(total), // ★ここがHMS
+    totalText: formatHMS(total),
   };
+}
+
+function nextStageKey(stageKey) {
+  if (stageKey === "district") return "prefecture";
+  if (stageKey === "prefecture") return "region";
+  if (stageKey === "region") return "national";
+  return null;
 }
 
 // playerPicks: [{leg,event,athlete}] 7つ
@@ -55,11 +62,26 @@ export function runEkiden(state, stageKey, playerPicks) {
     title: stageTitle(stageKey),
     when: `${state.month}月${state.week}週`,
     ranking: ranked,
+
+    // ★新仕様：次大会へ混ぜる「上位5校」
+    top5Schools: [],
   };
 
   const my = ranked.find(x => x.isPlayer);
   result.myRank = my?.rank ?? 999;
   result.cleared = result.myRank <= 5;
+
+  const toStage = nextStageKey(stageKey);
+  if (toStage) {
+    result.top5Schools = ranked
+      .slice(0, 5)
+      .map(x => ({
+        fromStage: stageKey,
+        toStage,
+        schoolName: x.school,
+        // 将来「学校の中身を持ち越す」拡張用（今は名前で十分）
+      }));
+  }
 
   state.lastMeetResult = result;
   return result;
