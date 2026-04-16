@@ -1,4 +1,5 @@
 import { calcEventPower, calcTimeSecondsFromPower, formatTime } from "./rules.js";
+import { recommendEkidenPicks } from "./recommend.js";
 
 function runTeamTime(teamPicks) {
   const legs = teamPicks.map(x => {
@@ -24,12 +25,8 @@ export function runEkiden(state, stageKey, playerPicks) {
   const player = runTeamTime(playerPicks);
 
   const others = rivals.map(s => {
-    // 相手は簡略：先頭7人を各区間に割当（大枠優先）
-    const picks = playerPicks.map((p, i) => ({
-      leg: p.leg,
-      event: p.event,
-      athlete: s.athletes[i % s.athletes.length],
-    }));
+    // ★他校も自校おすすめと同じ：区間最適＋重複なし
+    const picks = recommendEkidenPicks(s.athletes);
     const res = runTeamTime(picks);
     return { school: s.name, ...res };
   });
