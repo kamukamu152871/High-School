@@ -92,7 +92,13 @@ function renderRecordPicker(app, state, { onCancel, onConfirm }) {
 }
 
 // ===== 総体 =====
-function renderSoutaiPicker(app, state, { allowedEvents = null, allowedPairs = null,onCancel, onConfirm }) {
+function renderSoutaiPicker(app, state, {
+  allowedEvents = null,
+  allowedPairs = null,
+  readOnly = false,
+  onCancel,
+  onConfirm
+}) {
   const events = allowedEvents ?? EVENTS_MEET;
   const picks = []; // {athlete, event}
   let listScrollTop = 0;
@@ -101,8 +107,9 @@ function renderSoutaiPicker(app, state, { allowedEvents = null, allowedPairs = n
   function countByAthlete(a) { return picks.filter(p => p.athlete === a).length; }
 
   function canAdd(a, ev) {
+    if (readOnly) return false;
     if (!events.includes(ev)) return false;
-        // ★追加：勝ち抜けペア制限（県/地域/全国）
+
     if (allowedPairs) {
       const ok = allowedPairs.some(p => p.athleteId === a.id && p.event === ev);
       if (!ok) return false;
@@ -112,11 +119,18 @@ function renderSoutaiPicker(app, state, { allowedEvents = null, allowedPairs = n
     if (picks.some(p => p.athlete === a && p.event === ev)) return false;
     return true;
   }
+
   function remove(a, ev) {
+    if (readOnly) return;
     const idx = picks.findIndex(p => p.athlete === a && p.event === ev);
     if (idx >= 0) picks.splice(idx, 1);
   }
-  function isValid() { return picks.length > 0 && picks.every(p => events.includes(p.event)); }
+
+  function isValid() {
+    // readOnlyの場合は「0でもOK」にすると確認画面として成立しやすい
+    if (readOnly) return true;
+    return picks.length > 0 && picks.every(p => events.includes(p.event));
+  }
 
   function applyRecommended() {
     picks.splice(0, picks.length);
@@ -129,13 +143,17 @@ function renderSoutaiPicker(app, state, { allowedEvents = null, allowedPairs = n
     for (const r of filtered) picks.push(r);
   }
 
+  // readOnlyの場合、picksが空だと何も出ないので、最初におすすめを入れて表示だけする
+  if (readOnly && picks.length === 0) applyRecommended();
+
   function draw() {
     const eventBlocks = events.map(ev => {
       const pickedHere = picks.filter(p => p.event === ev);
+
       const list = pickedHere.map(p => `
         <div style="display:flex; justify-content:space-between; gap:8px; border-top:1px solid #eee; padding:6px 0;">
           <div>${p.athlete.name}（${p.athlete.grade}年/総合${p.athlete.overall}）</div>
-          <button data-del="1" data-aid="${p.athlete.id}" data-ev="${ev}" style="background:#a00;">外す</button>
+          ${readOnly ? "" : `<button data-del="1" data-aid="${p.athlete.id}" data-ev="${ev}" style="background:#a00;">外す</button>`}
         </div>
       `).join("") || `<div style="color:#777;">未選出</div>`;
 
@@ -158,7 +176,7 @@ function renderSoutaiPicker(app, state, { allowedEvents = null, allowedPairs = n
         <div style="padding:8px;border-top:1px solid #eee;">
           <div style="font-weight:700;">${athleteLabel(a)} / 出場数 ${used}/2</div>
           <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px;">
-            ${addButtons}
+            ${readOnly ? `<span style="color:#777;">（確認のみ）</span>` : addButtons}
           </div>
         </div>
       `;
@@ -166,18 +184,21 @@ function renderSoutaiPicker(app, state, { allowedEvents = null, allowedPairs = n
 
     app.innerHTML = `
       <div class="card">
-        <h2>出場選出：総体</h2>
+        <h2>${readOnly ? "出場確認：総体" : "出場選出：総体"}</h2>
         <p style="color:#555;">各種目3人まで／1人2種目まで</p>
+        ${readOnly ? `<p style="color:#b00;">��県以降は確認のみ（編集不可）</p>` : ""}
 
-        <div class="row" style="margin-top:8px;">
-          ${btn("おすすめ", "rec")}
-          ${smallBtn("全解除", "clear")}
-        </div>
+        ${readOnly ? "" : `
+          <div class="row" style="margin-top:8px;">
+            ${btn("おすすめ", "rec")}
+            ${smallBtn("全解除", "clear")}
+          </div>
+        `}
 
         <h3 style="margin-top:10px;">種目ごとの選出</h3>
         ${eventBlocks}
 
-        <h3 style="margin-top:14px;">選手一覧（追加）</h3>
+        <h3 style="margin-top:14px;">選手一覧</h3>
         <div id="alist" style="max-height:45vh; overflow:auto; border:1px solid #eee; border-radius:8px;">
           ${athleteRows}
         </div>
@@ -193,54 +214,53 @@ function renderSoutaiPicker(app, state, { allowedEvents = null, allowedPairs = n
       </div>
     `;
 
-    // スクロール復元
     const alist = document.querySelector("#alist");
     if (alist) alist.scrollTop = listScrollTop;
 
-    // 追加（押す前にスクロール位置保存）
-    app.querySelectorAll("button[data-add]").forEach(b => {
-      b.onclick = () => {
+    if (!readOnly) {
+      app.querySelectorAll("button[data-add]").forEach(b => {
+        b.onclick = () => {
+          const al = document.querySelector("#alist");
+          listScrollTop = al ? al.scrollTop : 0;
+
+          const aid = b.getAttribute("data-aid");
+          const ev = b.getAttribute("data-ev");
+          const a = state.athletes.find(x => x.id === aid);
+          if (!a) return;
+          if (!canAdd(a, ev)) return;
+          picks.push({ athlete: a, event: ev });
+          draw();
+        };
+      });
+
+      app.querySelectorAll("button[data-del]").forEach(b => {
+        b.onclick = () => {
+          const al = document.querySelector("#alist");
+          listScrollTop = al ? al.scrollTop : 0;
+
+          const aid = b.getAttribute("data-aid");
+          const ev = b.getAttribute("data-ev");
+          const a = state.athletes.find(x => x.id === aid);
+          if (!a) return;
+          remove(a, ev);
+          draw();
+        };
+      });
+
+      document.querySelector("#rec").onclick = () => {
         const al = document.querySelector("#alist");
         listScrollTop = al ? al.scrollTop : 0;
-
-        const aid = b.getAttribute("data-aid");
-        const ev = b.getAttribute("data-ev");
-        const a = state.athletes.find(x => x.id === aid);
-        if (!a) return;
-        if (!canAdd(a, ev)) return;
-        picks.push({ athlete: a, event: ev });
+        applyRecommended();
         draw();
       };
-    });
 
-    // 削除
-    app.querySelectorAll("button[data-del]").forEach(b => {
-      b.onclick = () => {
+      document.querySelector("#clear").onclick = () => {
         const al = document.querySelector("#alist");
         listScrollTop = al ? al.scrollTop : 0;
-
-        const aid = b.getAttribute("data-aid");
-        const ev = b.getAttribute("data-ev");
-        const a = state.athletes.find(x => x.id === aid);
-        if (!a) return;
-        remove(a, ev);
+        picks.splice(0, picks.length);
         draw();
       };
-    });
-
-    document.querySelector("#rec").onclick = () => {
-      const al = document.querySelector("#alist");
-      listScrollTop = al ? al.scrollTop : 0;
-      applyRecommended();
-      draw();
-    };
-
-    document.querySelector("#clear").onclick = () => {
-      const al = document.querySelector("#alist");
-      listScrollTop = al ? al.scrollTop : 0;
-      picks.splice(0, picks.length);
-      draw();
-    };
+    }
 
     document.querySelector("#ok").onclick = () => { if (isValid()) onConfirm(picks.slice()); };
     document.querySelector("#cancel").onclick = () => onCancel();
