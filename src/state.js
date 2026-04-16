@@ -98,6 +98,7 @@ function ensureRecords(state) {
     events: {
       "800": [],
       "1500": [],
+      "3000": [],
       "3000sc": [],
       "5000": [],
       "5000w": [],
@@ -117,7 +118,7 @@ function ensureRecords(state) {
   };
 
   state.records.events ??= {};
-  for (const ev of ["800", "1500", "3000sc", "5000", "5000w"]) {
+  for (const ev of ["800", "1500", "3000", "3000sc", "5000", "5000w"]) {
     state.records.events[ev] ??= [];
   }
 
@@ -177,6 +178,7 @@ export function createNewGameState() {
       events: {
         "800": [],
         "1500": [],
+        "3000": [],
         "3000sc": [],
         "5000": [],
         "5000w": [],
