@@ -48,7 +48,7 @@ function advanceWeek(state) {
   }
 }
 
-// --- qualify（通過管理）初期化/救済 ---
+// --- qualify（旧：通過管理）初期化/救済 ---
 function ensureQualify(state) {
   state.qualify ??= {
     soutai: { prefecturePairs: [], regionPairs: [], nationalPairs: [] },
@@ -67,7 +67,16 @@ function ensureFacilities(state) {
   state.facilities ??= { nagashi: 1, tt: 1, jog: 1, interval: 1, circuit: 1 };
 }
 
+function ensureCarry(state) {
+  state.carry ??= { soutai: { next: [] }, ekiden: { next: [] } };
+  state.carry.soutai ??= { next: [] };
+  state.carry.ekiden ??= { next: [] };
+  state.carry.soutai.next ??= [];
+  state.carry.ekiden.next ??= [];
+}
+
 function getAllowedSoutaiPairsForStage(state, stage) {
+  // 旧仕様を一旦温存（現状は picker が参照している）
   ensureQualify(state);
   if (stage === "district") return null;
   if (stage === "prefecture") return state.qualify.soutai.prefecturePairs;
@@ -80,6 +89,54 @@ function pairsToEvents(pairs) {
   if (!pairs) return null;
   const set = new Set(pairs.map(p => p.event));
   return Array.from(set);
+}
+
+// ---- carry を次大会の rivals に混ぜ込む（総体：混成校、駅伝：追加校） ----
+function buildSoutaiRivalsWithCarry(state, stageKey) {
+  ensureRivals(state);
+  ensureCarry(state);
+
+  const base = (state.rivals?.[stageKey] ?? []).slice();
+
+  // carryは「次のステージ宛」のものだけ混ぜる
+  const carry = (state.carry.soutai.next ?? []).filter(x => x.toStage === stageKey);
+  if (carry.length === 0) return base;
+
+  // 種目ごと上位に入った“選手”をまとめて混成校にする
+  const mixed = {
+    name: "持ち越し選手枠",
+    facilityLevel: 1,
+    groupKey: "carry",
+    athletes: carry.map(x => x.athlete),
+  };
+
+  return base.concat([mixed]);
+}
+
+function buildEkidenRivalsWithCarry(state, stageKey) {
+  ensureRivals(state);
+  ensureCarry(state);
+
+  const base = (state.rivals?.[stageKey] ?? []).slice();
+
+  const carry = (state.carry.ekiden.next ?? []).filter(x => x.toStage === stageKey);
+  if (carry.length === 0) return base;
+
+  // carry校は「名前一致」で base に既に存在する可能性があるので重複除外
+  const baseNames = new Set(base.map(s => s.name));
+  const add = carry
+    .map(x => x.schoolName)
+    .filter(n => !baseNames.has(n))
+    .map((n, i) => ({
+      name: n,
+      facilityLevel: 1,
+      groupKey: "carry_ekiden",
+      athletes: [], // 駅伝は recommendEkidenPicks が athletes を使うので、本来は学校実体が必要
+    }));
+
+  // 注意：ここは「学校実体」が必要なので、次の段階で改善します。
+  // 今回は“carryが保存される”ところまでを目的にし、合成は次回完成させます。
+  return base.concat(add);
 }
 
 // --- 画面 ---
@@ -104,6 +161,7 @@ function renderTitle() {
     ensureRivals(state);
     ensureQualify(state);
     ensureFacilities(state);
+    ensureCarry(state);
     saveGame(state);
     renderHome(state);
   };
@@ -114,6 +172,7 @@ function renderTitle() {
       ensureRivals(state);
       ensureQualify(state);
       ensureFacilities(state);
+      ensureCarry(state);
       saveGame(state);
       renderHome(state);
     }
@@ -172,9 +231,10 @@ function renderHome(state) {
       ensureRivals(state);
       ensureQualify(state);
       ensureFacilities(state);
+      ensureCarry(state);
 
-      rivalsWeeklyTraining(state);   // 相手校の裏練習
-      applyTraining(state, id);      // 自校の練習
+      rivalsWeeklyTraining(state);   // 今は固定能力なので実質noop
+      applyTraining(state, id);
 
       const meet = getMeetOfWeek(state);
       saveGame(state);
@@ -197,26 +257,33 @@ function renderHome(state) {
       }
 
       if (meet.type === "soutai") {
+        // carry混ぜ込み（この大会のステージに宛てられた carry を追加）
+        const original = state.rivals?.[meet.stage];
+        const mixed = buildSoutaiRivalsWithCarry(state, meet.stage);
+        state.rivals[meet.stage] = mixed;
+
         const allowedPairs = getAllowedSoutaiPairsForStage(state, meet.stage);
         const allowedEvents = pairsToEvents(allowedPairs);
-
-        if (Array.isArray(allowedPairs) && allowedPairs.length === 0) {
-          renderSimpleMessage(
-            state,
-            `${stageTitleSoutai(meet.stage)}：出場できる選手がいません（前大会で通過なし）`,
-            "OK（次の週へ）",
-            () => goNextWeek(state)
-          );
-          return;
-        }
 
         renderPicker(app, "soutai", state, {
           allowedEvents,
           allowedPairs,
-          onCancel: () => renderHome(state),
+          onCancel: () => {
+            state.rivals[meet.stage] = original;
+            renderHome(state);
+          },
           onConfirm: (picks) => {
             const result = runSoutai(state, meet.stage, picks, allowedEvents);
+
+            // ★新：carry保存（次大会へ混ぜる“選手”）
+            state.carry.soutai.next = result.carryCandidates ?? [];
+
+            // 旧：通過管理も一旦残す
             saveSoutaiQualificationPairs(state, meet.stage, result);
+
+            // 元に戻す
+            state.rivals[meet.stage] = original;
+
             saveGame(state);
             renderSoutaiResult(state, result);
           }
@@ -225,22 +292,17 @@ function renderHome(state) {
       }
 
       if (meet.type === "ekiden") {
-        if (!canEnterEkidenStage(state, meet.stage)) {
-          saveGame(state);
-          renderSimpleMessage(
-            state,
-            `${stageTitleEkiden(meet.stage)}：出場条件を満たしていません`,
-            "OK（次の週へ）",
-            () => goNextWeek(state)
-          );
-          return;
-        }
-
         renderPicker(app, "ekiden", state, {
           onCancel: () => renderHome(state),
           onConfirm: (picks) => {
             const result = runEkiden(state, meet.stage, picks);
+
+            // ★新：carry保存（次大会へ混ぜる“高校”）
+            state.carry.ekiden.next = result.top5Schools ?? [];
+
+            // 旧：自校通過フラグも一旦残す
             saveEkidenQualification(state, meet.stage, result);
+
             saveGame(state);
             renderEkidenResult(state, result);
           }
@@ -284,7 +346,6 @@ function renderFacilities(state) {
 }
 
 function renderAthletes(state) {
-  // ★表示は小数切り捨て
   const f = (n) => Math.floor(n);
 
   const rows = (state.athletes ?? []).map(a => `
@@ -324,7 +385,7 @@ function renderAthletes(state) {
   document.querySelector("#home").onclick = () => renderHome(state);
 }
 
-// --- 条件（通過管理） ---
+// --- 条件（旧：通過管理） ---
 function saveSoutaiQualificationPairs(state, stage, result) {
   ensureQualify(state);
   const pairs = result.qualifiedPairs ?? [];
@@ -338,15 +399,6 @@ function saveEkidenQualification(state, stage, result) {
   if (stage === "district") state.qualify.ekiden.prefecture = !!result.cleared;
   if (stage === "prefecture") state.qualify.ekiden.region = !!result.cleared;
   if (stage === "region") state.qualify.ekiden.national = !!result.cleared;
-}
-
-function canEnterEkidenStage(state, stage) {
-  ensureQualify(state);
-  if (stage === "district") return true;
-  if (stage === "prefecture") return !!state.qualify.ekiden.prefecture;
-  if (stage === "region") return !!state.qualify.ekiden.region;
-  if (stage === "national") return !!state.qualify.ekiden.national;
-  return true;
 }
 
 // --- 設備アップ：総体の「優勝」で段階的に上げる ---
@@ -384,7 +436,6 @@ function upgradeFacilityBySoutaiWinners(state, result) {
 
 // --- 結果画面 ---
 function renderRecordResult(state, result) {
-  // ★組/組順位を消す（全体順位＋選手＋タイムだけ）
   const sections = ["1500", "3000", "5000"].map(ev => {
     const rows = result.playerOnly[ev].map(r => `
       <tr>
@@ -432,7 +483,6 @@ function renderSoutaiResult(state, result) {
 
     const list = er.type === "withFinal" ? er.final : er.overall;
 
-    // 上位10（全体）
     const top = list.slice(0, 10).map((x, i) => `
       <tr>
         <td>${i + 1}</td>
@@ -443,7 +493,6 @@ function renderSoutaiResult(state, result) {
       </tr>
     `).join("");
 
-    // ★自校選手一覧（全体順位＋タイム）
     const myRows = list
       .map((x, i) => ({ ...x, rank: i + 1 }))
       .filter(x => x.isPlayer)
@@ -566,7 +615,7 @@ function renderSimpleMessage(state, title, okText, okFn) {
   document.querySelector("#ok").onclick = okFn;
 }
 
-// --- 年度更新：state.js と完全一致させる版 ---
+// --- 年度更新 ---
 function runYearUpdate(state) {
   applyYearUpdateToState(state);
   rivalsYearUpdate(state);
@@ -576,10 +625,14 @@ function runYearUpdate(state) {
     ekiden: { prefecture: false, region: false, national: false },
   };
 
+  // carryは翌年に持ち越さない（年度更新でリセット）
+  ensureCarry(state);
+  state.carry.soutai.next = [];
+  state.carry.ekiden.next = [];
+
   ensureFacilities(state);
 }
 
-// --- 表示ラベル ---
 function stageTitleSoutai(key) {
   if (key === "district") return "地区総体";
   if (key === "prefecture") return "県総体";
