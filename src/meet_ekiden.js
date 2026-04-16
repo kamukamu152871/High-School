@@ -1,6 +1,14 @@
 import { calcEventPower, calcTimeSecondsFromPower, formatTime } from "./rules.js";
 import { recommendEkidenPicks } from "./recommend.js";
 
+function formatHMS(totalSec) {
+  const s = Math.floor(totalSec);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return `${h}時間${m}分${sec}秒`;
+}
+
 function runTeamTime(teamPicks) {
   const legs = teamPicks.map(x => {
     const power = calcEventPower(x.athlete, x.event);
@@ -14,8 +22,12 @@ function runTeamTime(teamPicks) {
     };
   });
 
-  const total = legs.reduce((s, x) => s + x.timeSec, 0);
-  return { legs, totalSec: total, totalText: formatTime(total, 1) };
+  const total = legs.reduce((sum, x) => sum + x.timeSec, 0);
+  return {
+    legs,
+    totalSec: total,
+    totalText: formatHMS(total), // ★ここがHMS
+  };
 }
 
 // playerPicks: [{leg,event,athlete}] 7つ
@@ -25,7 +37,6 @@ export function runEkiden(state, stageKey, playerPicks) {
   const player = runTeamTime(playerPicks);
 
   const others = rivals.map(s => {
-    // ★他校も自校おすすめと同じ：区間最適＋重複なし
     const picks = recommendEkidenPicks(s.athletes);
     const res = runTeamTime(picks);
     return { school: s.name, ...res };
