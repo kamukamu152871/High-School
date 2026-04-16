@@ -1,5 +1,12 @@
-import { createNewGameState, saveGame, loadGame, clearSave } from "./state.js";
-import { TRAININGS, applyTraining, randInt } from "./rules.js";
+import {
+  createNewGameState,
+  saveGame,
+  loadGame,
+  clearSave,
+  applyYearUpdateToState,
+} from "./state.js";
+
+import { TRAININGS, applyTraining } from "./rules.js";
 import { ensureRivals, rivalsWeeklyTraining, rivalsYearUpdate } from "./rivals.js";
 import { renderPicker } from "./ui_pick.js";
 
@@ -11,18 +18,15 @@ const app = document.querySelector("#app");
 
 // --- スケジュール（練習後に大会） ---
 function getMeetOfWeek(state) {
-  // 記録会：4月4週後、9月3週後、3月3週後
   if (state.month === 4 && state.week === 4) return { type: "record" };
   if (state.month === 9 && state.week === 3) return { type: "record" };
   if (state.month === 3 && state.week === 3) return { type: "record" };
 
-  // 総体：5月1週後 地区、5月4週後 県、6月3週後 地域、7月4週後 全国
   if (state.month === 5 && state.week === 1) return { type: "soutai", stage: "district" };
   if (state.month === 5 && state.week === 4) return { type: "soutai", stage: "prefecture" };
   if (state.month === 6 && state.week === 3) return { type: "soutai", stage: "region" };
   if (state.month === 7 && state.week === 4) return { type: "soutai", stage: "national" };
 
-  // 駅伝：10月2週後 地区、10月4週後 県、11月2週後 地域、12月3週後 全国
   if (state.month === 10 && state.week === 2) return { type: "ekiden", stage: "district" };
   if (state.month === 10 && state.week === 4) return { type: "ekiden", stage: "prefecture" };
   if (state.month === 11 && state.week === 2) return { type: "ekiden", stage: "region" };
@@ -51,7 +55,6 @@ function ensureQualify(state) {
     ekiden: { prefecture: false, region: false, national: false },
   };
 
-  // 旧形式救済（prefecture/region/national が配列だった場合）
   if (state.qualify.soutai && ("prefecture" in state.qualify.soutai)) {
     state.qualify = {
       soutai: { prefecturePairs: [], regionPairs: [], nationalPairs: [] },
@@ -60,9 +63,12 @@ function ensureQualify(state) {
   }
 }
 
+function ensureFacilities(state) {
+  state.facilities ??= { nagashi: 1, tt: 1, jog: 1, interval: 1, circuit: 1 };
+}
+
 function getAllowedSoutaiPairsForStage(state, stage) {
   ensureQualify(state);
-
   if (stage === "district") return null;
   if (stage === "prefecture") return state.qualify.soutai.prefecturePairs;
   if (stage === "region") return state.qualify.soutai.regionPairs;
@@ -88,12 +94,8 @@ function renderTitle() {
         <button id="cont" ${hasSave ? "" : "disabled"}>つづきから</button>
         <button class="secondary" id="reset" ${hasSave ? "" : "disabled"}>セーブ削除</button>
       </div>
-      <p style="margin-top:12px;color:#555;">
-        端末内（ブラウザ）に自動でセーブされます。
-      </p>
-      <p style="margin-top:8px;color:#b00;">
-        ※大きく仕様変更したので、最初は「セーブ削除」を推奨します。
-      </p>
+      <p style="margin-top:12px;color:#555;">端末内（ブラウザ）に自動でセーブされます。</p>
+      <p style="margin-top:8px;color:#b00;">※大きく仕様変更したので、最初は「セーブ削除」を推奨します。</p>
     </div>
   `;
 
@@ -101,6 +103,7 @@ function renderTitle() {
     const state = createNewGameState();
     ensureRivals(state);
     ensureQualify(state);
+    ensureFacilities(state);
     saveGame(state);
     renderHome(state);
   };
@@ -110,6 +113,7 @@ function renderTitle() {
     if (state) {
       ensureRivals(state);
       ensureQualify(state);
+      ensureFacilities(state);
       saveGame(state);
       renderHome(state);
     }
@@ -136,9 +140,7 @@ function renderHome(state) {
     ? "この週の最後に【年度更新（引退/進級/新入生）】があります"
     : "";
 
-  const trainingButtons = TRAININGS.map(t => `
-    <button data-tr="${t.id}">${t.name}</button>
-  `).join("");
+  const trainingButtons = TRAININGS.map(t => `<button data-tr="${t.id}">${t.name}</button>`).join("");
 
   app.innerHTML = `
     <div class="card">
@@ -149,22 +151,18 @@ function renderHome(state) {
       <p style="color:#555;">今週の練習：${state.lastTraining?.name ?? "未実施"}</p>
 
       <h3 style="margin-top:14px;">練習（タップで実行→大会があれば選出→次週へ）</h3>
-      <div class="row">
-        ${trainingButtons}
-      </div>
+      <div class="row">${trainingButtons}</div>
 
       <div class="row" style="margin-top:12px;">
         <button id="athletes">選手</button>
+        <button id="facilities">設備</button>
         <button class="secondary" id="back">タイトルへ</button>
       </div>
-
-      <p style="margin-top:10px;color:#777;">
-        ※「練習」を選ぶとその週が進行します（大会週は選出画面が出ます）。
-      </p>
     </div>
   `;
 
   document.querySelector("#athletes").onclick = () => renderAthletes(state);
+  document.querySelector("#facilities").onclick = () => renderFacilities(state);
   document.querySelector("#back").onclick = () => renderTitle();
 
   app.querySelectorAll("button[data-tr]").forEach(b => {
@@ -173,14 +171,11 @@ function renderHome(state) {
 
       ensureRivals(state);
       ensureQualify(state);
+      ensureFacilities(state);
 
-      // 裏練習（相手校）
-      rivalsWeeklyTraining(state);
+      rivalsWeeklyTraining(state);   // 相手校の裏練習
+      applyTraining(state, id);      // 自校の練習
 
-      // 練習適用（自校）
-      applyTraining(state, id);
-
-      // 大会があるなら選出へ
       const meet = getMeetOfWeek(state);
       saveGame(state);
 
@@ -205,7 +200,6 @@ function renderHome(state) {
         const allowedPairs = getAllowedSoutaiPairsForStage(state, meet.stage);
         const allowedEvents = pairsToEvents(allowedPairs);
 
-        // district以外：通過者が0なら出場不可
         if (Array.isArray(allowedPairs) && allowedPairs.length === 0) {
           renderSimpleMessage(
             state,
@@ -217,8 +211,8 @@ function renderHome(state) {
         }
 
         renderPicker(app, "soutai", state, {
-          allowedEvents: allowedEvents,
-          allowedPairs: allowedPairs,
+          allowedEvents,
+          allowedPairs,
           onCancel: () => renderHome(state),
           onConfirm: (picks) => {
             const result = runSoutai(state, meet.stage, picks, allowedEvents);
@@ -258,13 +252,35 @@ function renderHome(state) {
 }
 
 function goNextWeek(state) {
-  // 年度更新は「3月4週の処理が終わった後」
   if (isYearUpdateWeek(state)) runYearUpdate(state);
-
   advanceWeek(state);
   state.lastTraining = null;
   saveGame(state);
   renderHome(state);
+}
+
+function renderFacilities(state) {
+  ensureFacilities(state);
+  const f = state.facilities;
+
+  app.innerHTML = `
+    <div class="card">
+      <h2>練習設備レベル</h2>
+      <table style="width:100%; border-collapse:collapse;">
+        <tbody>
+          <tr><td>流し</td><td>Lv ${f.nagashi}</td></tr>
+          <tr><td>TT</td><td>Lv ${f.tt}</td></tr>
+          <tr><td>ジョグ</td><td>Lv ${f.jog}</td></tr>
+          <tr><td>インターバル</td><td>Lv ${f.interval}</td></tr>
+          <tr><td>サーキット</td><td>Lv ${f.circuit}</td></tr>
+        </tbody>
+      </table>
+      <div class="row" style="margin-top:12px;">
+        <button class="secondary" id="home">戻る</button>
+      </div>
+    </div>
+  `;
+  document.querySelector("#home").onclick = () => renderHome(state);
 }
 
 function renderAthletes(state) {
@@ -302,16 +318,13 @@ function renderAthletes(state) {
       </div>
     </div>
   `;
-
   document.querySelector("#home").onclick = () => renderHome(state);
 }
 
-// --- 条件（通過管理：総体はペアで管理） ---
+// --- 条件（通過管理） ---
 function saveSoutaiQualificationPairs(state, stage, result) {
   ensureQualify(state);
-
   const pairs = result.qualifiedPairs ?? [];
-
   if (stage === "district") state.qualify.soutai.prefecturePairs = pairs;
   if (stage === "prefecture") state.qualify.soutai.regionPairs = pairs;
   if (stage === "region") state.qualify.soutai.nationalPairs = pairs;
@@ -319,7 +332,6 @@ function saveSoutaiQualificationPairs(state, stage, result) {
 
 function saveEkidenQualification(state, stage, result) {
   ensureQualify(state);
-
   if (stage === "district") state.qualify.ekiden.prefecture = !!result.cleared;
   if (stage === "prefecture") state.qualify.ekiden.region = !!result.cleared;
   if (stage === "region") state.qualify.ekiden.national = !!result.cleared;
@@ -334,7 +346,40 @@ function canEnterEkidenStage(state, stage) {
   return true;
 }
 
-// --- 結果画面（最後に「OK」で次週ホームへ） ---
+// --- 設備アップ：総体の「優勝」で段階的に上げる ---
+function upgradeFacilityBySoutaiWinners(state, result) {
+  const targetLv =
+    result.stage === "district" ? 2 :
+    result.stage === "prefecture" ? 3 :
+    result.stage === "region" ? 4 : null;
+
+  if (!targetLv) return;
+
+  ensureFacilities(state);
+
+  const map = {
+    "800": "nagashi",
+    "1500": "tt",
+    "3000sc": "circuit",
+    "5000": "jog",
+    "5000w": "interval",
+  };
+
+  for (const [ev, facilityKey] of Object.entries(map)) {
+    const er = result.events?.[ev];
+    if (!er) continue;
+
+    const list = er.type === "withFinal" ? er.final : er.overall;
+    if (!list || list.length === 0) continue;
+
+    const winner = list[0];
+    if (winner.isPlayer) {
+      state.facilities[facilityKey] = Math.max(state.facilities[facilityKey], targetLv);
+    }
+  }
+}
+
+// --- 結果画面 ---
 function renderRecordResult(state, result) {
   const sections = ["1500", "3000", "5000"].map(ev => {
     const rows = result.playerOnly[ev].map(r => `
@@ -374,8 +419,10 @@ function renderRecordResult(state, result) {
 }
 
 function renderSoutaiResult(state, result) {
-  const evOrder = ["800", "1500", "3000sc", "5000", "5000w"];
+  upgradeFacilityBySoutaiWinners(state, result);
+  saveGame(state);
 
+  const evOrder = ["800", "1500", "3000sc", "5000", "5000w"];
   const sections = evOrder.map(ev => {
     const er = result.events[ev];
     if (!er) return "";
@@ -400,7 +447,6 @@ function renderSoutaiResult(state, result) {
           <tbody>${top}</tbody>
         </table>
       </div>
-      <p style="color:#777;margin:6px 0 0 0;">※上位10人のみ表示</p>
     `;
   }).join("");
 
@@ -490,62 +536,22 @@ function renderSimpleMessage(state, title, okText, okFn) {
   document.querySelector("#ok").onclick = okFn;
 }
 
-// --- 年度更新（簡略：後でstate.jsと共通化推奨） ---
+// --- 年度更新：state.js と完全一致させる版 ---
 function runYearUpdate(state) {
-  const survivors = state.athletes.filter(a => a.grade !== 3);
-  for (const a of survivors) a.grade += 1;
+  // state.js のロジックを使う（新入生の能力分布も一致）
+  applyYearUpdateToState(state);
 
-  const family = ["佐藤","鈴木","高橋","田中","伊藤","渡辺","山本","中村","小林","加藤"];
-  const given = ["翔太","蓮","大翔","悠真","陽斗","蒼","大和","悠人","颯太","結翔"];
-  function randName() { return `${family[Math.floor(Math.random()*family.length)]} ${given[Math.floor(Math.random()*given.length)]}`; }
-  function personality() {
-    const r = Math.random() * 100;
-    if (r < 16) return "たんき";
-    if (r < 32) return "せっかち";
-    if (r < 48) return "おおらか";
-    if (r < 64) return "がんこ";
-    if (r < 80) return "きよう";
-    if (r < 96) return "ふつう";
-    return "てんさい";
-  }
-  function abil() {
-    const min = 10, max = 40;
-    return {
-      sprint: randInt(min, max),
-      speed: randInt(min, max),
-      stamina: randInt(min, max),
-      toughness: randInt(min, max),
-      technique: randInt(min, max),
-    };
-  }
-  function overall(ab) {
-    return Math.round((ab.sprint + ab.speed + ab.stamina + ab.toughness + ab.technique) / 5);
-  }
-
-  const freshmen = [];
-  for (let i = 0; i < 5; i++) {
-    const ab = abil();
-    freshmen.push({
-      id: `1-${i}-${Math.random()}`,
-      grade: 1,
-      name: randName(),
-      personality: personality(),
-      abilities: ab,
-      overall: overall(ab),
-    });
-  }
-
-  state.athletes = freshmen.concat(survivors);
-  state.year += 1;
-
-  // 相手校も年度更新
+  // 相手校も年度更新（設備Lvは保持）
   rivalsYearUpdate(state);
 
-  // 通過情報は翌年にリセット（ペア形式）
+  // 通過情報は翌年にリセット
   state.qualify = {
     soutai: { prefecturePairs: [], regionPairs: [], nationalPairs: [] },
     ekiden: { prefecture: false, region: false, national: false },
   };
+
+  // 設備は保持（強化していく）
+  ensureFacilities(state);
 }
 
 // --- 表示ラベル ---
