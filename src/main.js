@@ -383,26 +383,57 @@ function renderHelp(state) {
         <li>結果を見たら「OK（次の週へ）」で進みます。</li>
       </ul>
 
-      <h3 style="margin-top:12px;">練習と設備</h3>
+      <h3 style="margin-top:12px;">能力の種類</h3>
       <ul>
-        <li>練習すると能力が上がります（設備Lvが高いほど上昇が大きい）。</li>
-        <li>総体で種目優勝すると、対応する設備Lvが上がります。</li>
-        
+        <li>SPRINT：瞬発力</li>
+        <li>SPEED：スピード</li>
+        <li>STAMINA：スタミナ</li>
+        <li>TOUGHNESS：タフネス</li>
+        <li>TECHNIQUE：テクニック</li>
       </ul>
 
-      <h3 style="margin-top:12px;">大会について</h3>
+      <h3 style="margin-top:12px;">練習と伸びる能力</h3>
       <ul>
-        <li>総体：800 / 1500 / 3000SC / 5000 / 5000W</li>
-        <li>駅伝：7区間（10000/3000/8000/8000/3000/5000/5000）</li>
-        <li>県以降の総体は「前大会の上位枠」確認のみで進みます。</li>
+        <li>流し：主に <b>SPRINT</b> が伸びやすい練習です。</li>
+        <li>TT：主に <b>SPEED</b> が伸びやすい練習です。</li>
+        <li>ジョグ：主に <b>STAMINA</b> が伸びやすい練習です。</li>
+        <li>インターバル：主に <b>TOUGHNESS</b> が伸びやすい練習です。</li>
+        <li>サーキット：主に <b>TECHNIQUE</b> が伸びやすい練習です。</li>
       </ul>
 
-      <h3 style="margin-top:12px;">相手校（群とレベル）</h3>
+      <h3 style="margin-top:12px;">性格補正（練習の伸び方）</h3>
       <ul>
-        <li>相手校は「群（district/prefecture/region/national）」で大会参加が決まります。</li>
-        <li>強さは「level(1〜4)」で決まります（学校ごとに設定）。</li>
+        <li>選手の性格によって、特定の練習で能力が伸びやすくなります。</li>
+        <li>短気：<b>SPRINT</b> 系が伸びやすい傾向があります。</li>
+        <li>せっかち：<b>SPEED</b> 系が伸びやすい傾向があります。</li>
+        <li>おおらか：<b>STAMINA</b> 系が伸びやすい傾向があります。</li>
+        <li>がんこ：<b>TOUGHNESS</b> 系が伸びやすい傾向があります。</li>
+        <li>きよう：<b>TECHNIQUE</b> 系が伸びやすい傾向があります。</li>
+        <li>ふつう：全体的に安定して伸びやすい傾向があります。</li>
+        <li>てんさい：多方面で伸びやすく、化ける可能性があります。</li>
       </ul>
 
+      <h3 style="margin-top:12px;">総体：種目ごとの重要能力（目安）</h3>
+      <ul>
+        <li>800m：主に <b>SPRINT</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
+        <li>1500m：主に <b>SPRINT</b> と <b>SPEED</b>、さらに <b>STAMINA</b> も影響します。</li>
+        <li>3000mSC：主に <b>SPEED</b>・<b>STAMINA</b> に加えて、<b>TECHNIQUE</b> の影響が出やすいです。</li>
+        <li>5000m：主に <b>SPEED</b> と <b>STAMINA</b>、さらに <b>TOUGHNESS</b> も効きやすいです。</li>
+        <li>5000mW：主に <b>TOUGHNESS</b> と <b>TECHNIQUE</b> が重要になりやすいです。</li>
+      </ul>
+
+      <h3 style="margin-top:12px;">駅伝：区間ごとの重要能力（目安）</h3>
+      <ul>
+        <li>1区 10000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
+        <li>2区 3000m：主に <b>SPRINT</b>・<b>SPEED</b> と <b>STAMINA</b> のバランスが効きやすいです。</li>
+        <li>3区 8000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
+        <li>4区 8000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
+        <li>5区 3000m：主に <b>SPRINT</b>・<b>SPEED</b> と <b>STAMINA</b> のバランスが効きやすいです。</li>
+        <li>6区 5000m：主に <b>SPEED</b> と <b>STAMINA</b> に加えて、<b>TOUGHNESS</b> も影響します。</li>
+        <li>7区 5000m：主に <b>SPEED</b> と <b>STAMINA</b> に加えて、<b>TOUGHNESS</b> も影響します。</li>
+      </ul>
+
+     
       <div class="row" style="margin-top:14px;">
         <button class="secondary" id="back">戻る</button>
       </div>
@@ -410,7 +441,6 @@ function renderHelp(state) {
   `;
   document.querySelector("#back").onclick = () => renderHome(state);
 }
-
 function renderFacilities(state) {
   ensureFacilities(state);
   const f = state.facilities;
