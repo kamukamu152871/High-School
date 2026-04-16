@@ -76,7 +76,6 @@ function ensureCarry(state) {
 }
 
 // ---- carry を次大会の rivals に混ぜ込む ----
-// 総体：carryCandidates（上位N選手）を「混成校」として追加
 function buildSoutaiRivalsWithCarry(state, stageKey) {
   ensureRivals(state);
   ensureCarry(state);
@@ -85,16 +84,36 @@ function buildSoutaiRivalsWithCarry(state, stageKey) {
   const carry = (state.carry.soutai.next ?? []).filter(x => x.toStage === stageKey);
   if (carry.length === 0) return base;
 
-  const mixed = {
-    name: "持ち越し選手枠",
-    facilityLevel: 1,
-    groupKey: "carry",
-    athletes: carry.map(x => x.athlete),
-  };
+  // すでにいる学校名（同名は重複させない）
+  const baseNames = new Set(base.map(s => s.name));
 
-  return base.concat([mixed]);
+  // carry選手を「所属校名」ごとにまとめる
+  const bySchool = new Map(); // schoolName -> athletes[]
+  for (const c of carry) {
+    const schoolName = c.schoolName ?? "不明校";
+    if (!bySchool.has(schoolName)) bySchool.set(schoolName, []);
+    bySchool.get(schoolName).push(c.athlete);
+  }
+
+  // 所属校名ごとに“仮想校”を追加
+  // ※同名の学校が base に存在する場合は、そこに合流させる（選手を足す）
+  for (const [schoolName, athletes] of bySchool.entries()) {
+    if (baseNames.has(schoolName)) {
+      const s = base.find(x => x.name === schoolName);
+      if (s) s.athletes = (s.athletes ?? []).concat(athletes);
+    } else {
+      base.push({
+        name: schoolName,
+        facilityLevel: 1,
+        groupKey: "carry",
+        athletes,
+      });
+      baseNames.add(schoolName);
+    }
+  }
+
+  return base;
 }
-
 // 駅伝：top5Teams の team（学校オブジェクト）を追加（重複除外）
 function buildEkidenRivalsWithCarry(state, stageKey) {
   ensureRivals(state);
@@ -368,14 +387,14 @@ function renderHelp(state) {
       <ul>
         <li>練習すると能力が上がります（設備Lvが高いほど上昇が大きい）。</li>
         <li>総体で種目優勝すると、対応する設備Lvが上がります。</li>
-        <li>能力に0.5が入る場合がありますが、タイム計算は切り捨てで計算���れます。</li>
+        
       </ul>
 
       <h3 style="margin-top:12px;">大会について</h3>
       <ul>
         <li>総体：800 / 1500 / 3000SC / 5000 / 5000W</li>
         <li>駅伝：7区間（10000/3000/8000/8000/3000/5000/5000）</li>
-        <li>県以降の��体は「前大会の上位枠」確認のみで進みます。</li>
+        <li>県以降の総体は「前大会の上位枠」確認のみで進みます。</li>
       </ul>
 
       <h3 style="margin-top:12px;">相手校（群とレベル）</h3>
