@@ -582,7 +582,96 @@ function renderHelp(state) {
   app.innerHTML = `
     <div class="card">
       <h2>ヘルプ</h2>
-      <p style="color:#555;">（ここにあなたが文章を書いてください）</p>
+
+      <h3 style="margin-top:12px;">基本の流れ</h3>
+      <ul>
+        <li>ホームで練習を選ぶ → 週が進みます。</li>
+        <li>大会がある週は、練習後に出場確認/選出して大会を実行します。</li>
+        <li>結果を見たら「OK（次の週へ）」で進みます。</li>
+        <li>年度末（3月4週）には、設備強化・スカウト・年度更新があります。</li>
+      </ul>
+
+      <h3 style="margin-top:12px;">能力の種類</h3>
+      <ul>
+        <li><b>SPRINT</b>：瞬発力</li>
+        <li><b>SPEED</b>：スピード</li>
+        <li><b>STAMINA</b>：スタミナ</li>
+        <li><b>TOUGHNESS</b>：タフネス</li>
+        <li><b>TECHNIQUE</b>：テクニック</li>
+      </ul>
+
+      <h3 style="margin-top:12px;">練習と伸びる能力</h3>
+      <ul>
+        <li>流し：主に <b>SPRINT</b> が伸びやすい練習です。</li>
+        <li>TT：主に <b>SPEED</b> が伸びやすい練習です。</li>
+        <li>ジョグ：主に <b>STAMINA</b> が伸びやすい練習です。</li>
+        <li>インターバル：主に <b>TOUGHNESS</b> が伸びやすい練習です。</li>
+        <li>サーキット：主に <b>TECHNIQUE</b> が伸びやすい練習です。</li>
+      </ul>
+
+      <h3 style="margin-top:12px;">性格補正（練習の伸び方）</h3>
+      <ul>
+        <li>選手の性格によって、特定の練習で能力が伸びやすくなります。</li>
+        <li>短気：<b>SPRINT</b> 系が伸びやすい傾向があります。</li>
+        <li>せっかち：<b>SPEED</b> 系が伸びやすい傾向があります。</li>
+        <li>おおらか：<b>STAMINA</b> 系が伸びやすい傾向があります。</li>
+        <li>がんこ：<b>TOUGHNESS</b> 系が伸びやすい傾向があります。</li>
+        <li>きよう：<b>TECHNIQUE</b> 系が伸びやすい傾向があります。</li>
+        <li>ふつう：全体的に安定して伸びやすい傾向があります。</li>
+        <li>てんさい：多方面で伸びやすく、化ける可能性があります。</li>
+      </ul>
+
+      <h3 style="margin-top:12px;">総体：種目ごとの重要能力（目安）</h3>
+      <ul>
+        <li>800m：主に <b>SPRINT</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
+        <li>1500m：主に <b>SPRINT</b> と <b>SPEED</b>、さらに <b>STAMINA</b> も影響します。</li>
+        <li>3000mSC：主に <b>SPEED</b>・<b>STAMINA</b> に加えて、<b>TECHNIQUE</b> の影響が出やすいです。</li>
+        <li>5000m：主に <b>SPEED</b> と <b>STAMINA</b>、さらに <b>TOUGHNESS</b> も効きやすいです。</li>
+        <li>5000mW：主に <b>TOUGHNESS</b> と <b>TECHNIQUE</b> が重要になりやすいです。</li>
+      </ul>
+
+      <h3 style="margin-top:12px;">駅伝：区間ごとの重要能力（目安）</h3>
+      <ul>
+        <li>1区 10000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
+        <li>2区 3000m：主に <b>SPRINT</b>・<b>SPEED</b> と <b>STAMINA</b> のバランスが効きやすいです。</li>
+        <li>3区 8000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
+        <li>4区 8000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
+        <li>5区 3000m：主に <b>SPRINT</b>・<b>SPEED</b> と <b>STAMINA</b> のバランスが効きやすいです。</li>
+        <li>6区 5000m：主に <b>SPEED</b> と <b>STAMINA</b> に加えて、<b>TOUGHNESS</b> も影響します。</li>
+        <li>7区 5000m：主に <b>SPEED</b> と <b>STAMINA</b> に加えて、<b>TOUGHNESS</b> も影響します。</li>
+      </ul>
+
+      <h3 style="margin-top:12px;">大会の出場条件</h3>
+      <ul>
+        <li>駅伝は、地区以外（県/地域/全国）では「前大会で5位以内」の条件を満たさないと出場できません。</li>
+        <li>総体は大会週に出場選出（県以降は確認のみ）を行い、そのまま実行できます。</li>
+      </ul>
+
+      <h3 style="margin-top:12px;">駅伝結果の見方（順位推移）</h3>
+      <ul>
+        <li>駅伝の結果画面では、各区ごとに「区間順位」と「その時点の累積順位（順位推移）」を確認できます。</li>
+        <li>累積順位は、各区終了時点での合計タイム順です。</li>
+      </ul>
+
+      <h3 style="margin-top:12px;">年度末（3月4週）の処理</h3>
+      <ul>
+        <li>3月4週目の最後に、次の順で処理が行われます。</li>
+        <li>① 設備強化：設備を1つ選んでレベルを1上げます。</li>
+        <li>② 新入生スカウト：候補10人から最大n人選びます（nはその年の駅伝成績で決まります）。</li>
+        <li>③ 年度更新：3年生引退→進級→新1年生が加入します（新入生5人の枠はスカウト生が優先されます）。</li>
+      </ul>
+
+      <h3 style="margin-top:12px;">スカウト人数（駅伝成績による）</h3>
+      <ul>
+        <li>全国駅伝 優勝：5人</li>
+        <li>全国駅伝 出場：4人</li>
+        <li>地域駅伝 出場：3人</li>
+        <li>県駅伝 出場：2人</li>
+        <li>それ以外：1人</li>
+      </ul>
+
+   
+
       <div class="row" style="margin-top:14px;">
         <button class="secondary" id="back">戻る</button>
       </div>
@@ -590,7 +679,6 @@ function renderHelp(state) {
   `;
   document.querySelector("#back").onclick = () => renderHome(state);
 }
-
 function renderFacilities(state) {
   ensureFacilities(state);
   const f = state.facilities;
