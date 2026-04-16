@@ -46,11 +46,11 @@ export function runEkiden(state, stageKey, playerPicks) {
   const others = rivals.map(s => {
     const picks = recommendEkidenPicks(s.athletes);
     const res = runTeamTime(picks);
-    return { school: s.name, ...res };
+    return { school: s.name, isPlayer: false, schoolObj: s, ...res };
   });
 
-  const all = [{ school: state.teamName, isPlayer: true, ...player }]
-    .concat(others.map(x => ({ ...x, isPlayer: false })));
+  const all = [{ school: state.teamName, isPlayer: true, schoolObj: null, ...player }]
+    .concat(others);
 
   all.sort((a, b) => a.totalSec - b.totalSec);
 
@@ -63,8 +63,8 @@ export function runEkiden(state, stageKey, playerPicks) {
     when: `${state.month}月${state.week}週`,
     ranking: ranked,
 
-    // ★新仕様：次大会へ混ぜる「上位5校」
-    top5Schools: [],
+    // 次大会へ持ち越す上位5チーム（学校オブジェクトを保持）
+    top5Teams: [],
   };
 
   const my = ranked.find(x => x.isPlayer);
@@ -73,14 +73,24 @@ export function runEkiden(state, stageKey, playerPicks) {
 
   const toStage = nextStageKey(stageKey);
   if (toStage) {
-    result.top5Schools = ranked
-      .slice(0, 5)
-      .map(x => ({
+    result.top5Teams = ranked.slice(0, 5).map(x => {
+      if (x.isPlayer) {
+        // プレイヤー校は schoolObj が無いので、stateから再構築できる形で入れる
+        return {
+          fromStage: stageKey,
+          toStage,
+          isPlayer: true,
+          team: { name: state.teamName, athletes: state.athletes },
+        };
+      }
+      // 相手校は schoolObj をそのまま持ち越す（固定能力方針ならOK）
+      return {
         fromStage: stageKey,
         toStage,
-        schoolName: x.school,
-        // 将来「学校の中身を持ち越す」拡張用（今は名前で十分）
-      }));
+        isPlayer: false,
+        team: x.schoolObj,
+      };
+    });
   }
 
   state.lastMeetResult = result;
