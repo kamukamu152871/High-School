@@ -1025,18 +1025,21 @@ function renderSoutaiResult(state, result) {
           rankInHeat: i + 1,
         }))
       );
+      const athleteKey = (x, fallback) => x.athlete?.id ?? x.athlete?.name ?? fallback;
       const prelimRankMap = new Map(
         allHeatResults
           .slice()
           .sort((a, b) => a.timeSec - b.timeSec)
-          .map((x, i) => [(x.athlete?.id ?? x.athlete?.name ?? `unknown-${i}`), i + 1])
+          .map((x, i) => [athleteKey(x, `heat-${x.heat}-rank-${x.rankInHeat}`), i + 1])
       );
 
       playerRows = allHeatResults
         .filter(x => x.isPlayer)
-        .map((x, i) => {
-          const key = x.athlete?.id ?? x.athlete?.name ?? `unknown-${i}`;
-          const finalRank = (er.final ?? []).findIndex(f => (f.athlete?.id ?? f.athlete?.name) === key);
+        .map(x => {
+          const key = athleteKey(x, `heat-${x.heat}-rank-${x.rankInHeat}`);
+          const finalRank = (er.final ?? []).findIndex(f =>
+            (athleteKey(f, "") === key) || (f.athlete === x.athlete)
+          );
           const isFinalist = finalRank >= 0;
           const shown = isFinalist ? er.final[finalRank] : x;
           return {
