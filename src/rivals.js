@@ -1,7 +1,14 @@
-import { randInt } from "./rules.js";
+import { baseGainFromFacilityLevel, clamp1to100, randInt } from "./rules.js";
 
-// 重要：地区/県/地域/全国で能力補正しない（後で調整）
-// → 全群同じ能力レンジに統一
+// グループごとの設備Lv（全練習共通で同Lv）
+const GROUP_FACILITY_LEVEL = {
+  district: 1,
+  prefecture: 2,
+  region: 3,
+  national: 4,
+};
+
+// 能力レンジ（今回は補正なしで同一レンジ。後で調整）
 const BASE_RANGE = { min: 30, max: 80 };
 
 function makeAthlete() {
@@ -21,7 +28,13 @@ function makeAthlete() {
 function makeSchool(groupKey, idx) {
   const athletes = [];
   for (let i = 0; i < 15; i++) athletes.push(makeAthlete());
-  return { name: `${groupKey}校${idx + 1}`, athletes };
+
+  const lv = GROUP_FACILITY_LEVEL[groupKey] ?? 1;
+  return {
+    name: `${groupKey}校${idx + 1}`,
+    facilityLevel: lv, // 学校としての設備Lv（全練習共通）
+    athletes,
+  };
 }
 
 export function ensureRivals(state) {
@@ -35,22 +48,25 @@ export function ensureRivals(state) {
   };
 }
 
-// 裏練習：各群の全選手が毎週ランダムに1能力だけ+1〜+3（簡略）
+// 裏練習：各校の設備Lvで基礎上昇量を決め、ランダム能力を上げる（性格補正なし）
 export function rivalsWeeklyTraining(state) {
   ensureRivals(state);
+
   const stats = ["sprint", "speed", "stamina", "toughness", "technique"];
 
   for (const groupKey of Object.keys(state.rivals)) {
     for (const school of state.rivals[groupKey]) {
+      const lv = school.facilityLevel ?? 1;
       for (const a of school.athletes) {
         const stat = stats[randInt(0, stats.length - 1)];
-        a.abilities[stat] = Math.max(1, Math.min(100, a.abilities[stat] + randInt(1, 3)));
+        const base = baseGainFromFacilityLevel(lv); // 0.5 / 1 / 1.5 を含む
+        a.abilities[stat] = clamp1to100(a.abilities[stat] + base);
       }
     }
   }
 }
 
-// 年度更新：相手校も簡略で5人入れ替え
+// 年度更新：簡略で5人入れ替え（設備Lvは保持）
 export function rivalsYearUpdate(state) {
   ensureRivals(state);
   for (const groupKey of Object.keys(state.rivals)) {
