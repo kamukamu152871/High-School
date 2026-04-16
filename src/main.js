@@ -298,7 +298,7 @@ function renderHome(state) {
             const result = runEkiden(state, meet.stage, picks);
 
             // ★新：carry保存（次大会へ混ぜる“高校”）
-            state.carry.ekiden.next = result.top5Schools ?? [];
+            state.carry.ekiden.next = result.top5Teams ?? [];
 
             // 旧：自校通過フラグも一旦残す
             saveEkidenQualification(state, meet.stage, result);
