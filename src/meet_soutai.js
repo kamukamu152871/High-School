@@ -7,12 +7,8 @@ import {
   shuffle,
 } from "./rules.js";
 
-// 重要：地区/県/地域/全国で能力補正は付けない（同一のライバル群を使う）
-// → ライバルは state.rivals の該当群（district/prefecture/region/national）を利用する。
-// ※ rivals.js 側も同一レンジに後で統一します。
-
 // --- 自校：手動選出（UIで作る）を受け取る前提 ---
-// entries: [{school,isPlayer,athlete,event}, ...]
+// entries: [{athlete,event}, ...] を {school,isPlayer,athlete,event} に整形
 function normalizePlayerEntries(state, picked) {
   return picked.map(p => ({
     school: state.teamName,
@@ -35,10 +31,12 @@ function selectEntriesAI(school) {
   const eventCounts = Object.fromEntries(EVENTS_MEET.map(e => [e, 0]));
   const athleteCounts = new Map();
 
+  // 総合順
   const sorted = school.athletes.slice().sort((a, b) => overall(b) - overall(a));
 
   const entries = [];
   for (const a of sorted) {
+    // 得意種目順
     const powers = EVENTS_MEET
       .map(ev => ({ ev, p: calcEventPower(a, ev) }))
       .sort((x, y) => y.p - x.p);
@@ -48,7 +46,6 @@ function selectEntriesAI(school) {
       const used = athleteCounts.get(a) ?? 0;
       if (used >= maxEventsPerAthlete) break;
 
-      // 同一種目に同じ選手を二重登録しない
       if (entries.some(e => e.athlete === a && e.event === ev)) continue;
 
       entries.push({ school: school.name, isPlayer: false, athlete: a, event: ev });
@@ -75,6 +72,7 @@ function race(entries, event) {
 }
 
 function run800(allEntries) {
+  // 8人ずつ予選→各組1位で決勝
   const groups = groupBySize(allEntries, 8);
   const qualifiers = [];
   const heats = [];
@@ -82,7 +80,7 @@ function run800(allEntries) {
   for (let i = 0; i < groups.length; i++) {
     const r = race(groups[i], "800");
     heats.push({ heat: i + 1, results: r });
-    if (r[0]) qualifiers.push(r[0]); // 各組1位
+    if (r[0]) qualifiers.push(r[0]);
   }
 
   const final = race(qualifiers, "800");
@@ -90,6 +88,7 @@ function run800(allEntries) {
 }
 
 function run1500or3000sc(allEntries, event) {
+  // 16人ずつ予選→全体上位15で決勝
   const groups = groupBySize(allEntries, 16);
   const heats = [];
   const all = [];
@@ -106,6 +105,7 @@ function run1500or3000sc(allEntries, event) {
 }
 
 function run5000like(allEntries, event) {
+  // 30人ずつ→全体順位
   const groups = groupBySize(allEntries, 30);
   const heats = [];
   const all = [];
@@ -120,29 +120,13 @@ function run5000like(allEntries, event) {
   return { type: "noFinal", heats, overall };
 }
 
-function getPlayerRanks(eventResult) {
-  if (eventResult.type === "withFinal") {
-    return eventResult.final
-      .map((x, i) => ({ x, rank: i + 1 }))
-      .filter(r => r.x.isPlayer)
-      .map(r => r.rank);
-  }
-  return eventResult.overall
-    .map((x, i) => ({ x, rank: i + 1 }))
-    .filter(r => r.x.isPlayer)
-    .map(r => r.rank);
-}
-
 export function runSoutai(state, stageKey, playerPickedEntries, allowedEvents = null) {
-  // allowedEvents: 通過した種目だけ実施したい時に使用（県/地域/全国）
   const rivals = (state.rivals?.[stageKey] ?? []).slice();
-
-  // 相手校もシャッフル（雰囲気）
   shuffle(rivals);
 
   const playerEntriesAll = normalizePlayerEntries(state, playerPickedEntries);
 
-  // 通過種目限定がある場合はフィルタ
+  // 通過種目限定がある場合はフィルタ（保険）
   const playerEntries = allowedEvents
     ? playerEntriesAll.filter(e => allowedEvents.includes(e.event))
     : playerEntriesAll;
@@ -164,30 +148,26 @@ export function runSoutai(state, stageKey, playerPickedEntries, allowedEvents = 
     title: stageTitle(stageKey),
     when: `${state.month}月${state.week}週`,
     events: {},
-    // 種目別通過
     qualifiedEvents: [],
+    qualifiedPairs: [], // [{athleteId,event}]
     threshold: stageKey === "region" ? 5 : 7,
   };
 
-  // 種目ごと
+  // 種目ごとに実施（allowedEvents がある場合はその種目だけ）
   if (!allowedEvents || allowedEvents.includes("800")) result.events["800"] = run800(byEvent["800"]);
   if (!allowedEvents || allowedEvents.includes("1500")) result.events["1500"] = run1500or3000sc(byEvent["1500"], "1500");
   if (!allowedEvents || allowedEvents.includes("3000sc")) result.events["3000sc"] = run1500or3000sc(byEvent["3000sc"], "3000sc");
   if (!allowedEvents || allowedEvents.includes("5000")) result.events["5000"] = run5000like(byEvent["5000"], "5000");
   if (!allowedEvents || allowedEvents.includes("5000w")) result.events["5000w"] = run5000like(byEvent["5000w"], "5000w");
 
-   // 通過判定（全国は通過不要）
-  result.qualifiedPairs = []; // [{athleteId, event}]
+  // 通過判定（全国は通過不���）
   if (stageKey !== "national") {
     for (const ev of EVENTS_MEET) {
       if (allowedEvents && !allowedEvents.includes(ev)) continue;
       const er = result.events[ev];
       if (!er) continue;
 
-      // この種目で通過した「選手」を特定する（順位しきい値以内）
-      let ranked = [];
-      if (er.type === "withFinal") ranked = er.final;
-      else ranked = er.overall;
+      const ranked = (er.type === "withFinal") ? er.final : er.overall;
 
       for (let i = 0; i < ranked.length; i++) {
         const x = ranked[i];
@@ -198,7 +178,6 @@ export function runSoutai(state, stageKey, playerPickedEntries, allowedEvents = 
         }
       }
 
-      // 参考表示用に種目一覧も残す
       if (result.qualifiedPairs.some(p => p.event === ev)) {
         result.qualifiedEvents.push(ev);
       }
@@ -207,6 +186,7 @@ export function runSoutai(state, stageKey, playerPickedEntries, allowedEvents = 
 
   state.lastMeetResult = result;
   return result;
+}
 
 function stageTitle(key) {
   if (key === "district") return "地区総体";
