@@ -1,5 +1,11 @@
 import { baseGainFromFacilityLevel, clamp1to100, randInt } from "./rules.js";
 import { FAMILY_NAMES, GIVEN_NAMES } from "./data/names.js";
+import {
+  DISTRICT_SCHOOLS,
+  PREFECTURE_SCHOOLS,
+  REGION_SCHOOLS,
+  NATIONAL_SCHOOLS,
+} from "./data/schools.js";
 
 // グループごとの設備Lv（全練習共通）
 const GROUP_FACILITY_LEVEL = {
@@ -10,6 +16,7 @@ const GROUP_FACILITY_LEVEL = {
 };
 
 // グループごとの「能力加算」：2年/3年のみ適用、1年は0固定
+// district基準、prefecture=+2、region=+4、national=+6
 const GROUP_ABILITY_BONUS = {
   district: 0,
   prefecture: 2,
@@ -24,7 +31,7 @@ function randomFullName() {
   return `${choice(FAMILY_NAMES)} ${choice(GIVEN_NAMES)}`;
 }
 
-// state.js と同じ分布（A案）
+// 自校（state.js）と同じ学年別分布（A案）
 function sampleByRanges(ranges) {
   const r = Math.random() * 100;
   if (r < 45) return randInt(ranges[0][0], ranges[0][1]);
@@ -40,6 +47,7 @@ function rangesByGrade(grade) {
 function makeAbilitiesByGrade(grade, bonusForUpperGrades) {
   const ranges = rangesByGrade(grade);
 
+  // 2年/3年のみ補正（要望どおり）
   const add = (grade === 2 || grade === 3) ? bonusForUpperGrades : 0;
 
   return {
@@ -59,6 +67,13 @@ function makeAthlete(grade, bonusForUpperGrades) {
   };
 }
 
+function schoolNameListByGroup(groupKey) {
+  if (groupKey === "district") return DISTRICT_SCHOOLS;
+  if (groupKey === "prefecture") return PREFECTURE_SCHOOLS;
+  if (groupKey === "region") return REGION_SCHOOLS;
+  return NATIONAL_SCHOOLS;
+}
+
 function makeSchool(groupKey, idx) {
   const athletes = [];
   const upperBonus = GROUP_ABILITY_BONUS[groupKey] ?? 0;
@@ -69,11 +84,12 @@ function makeSchool(groupKey, idx) {
   for (let i = 0; i < 5; i++) athletes.push(makeAthlete(3, upperBonus));
 
   const lv = GROUP_FACILITY_LEVEL[groupKey] ?? 1;
+  const list = schoolNameListByGroup(groupKey);
+
   return {
-    name: `${groupKey}校${idx + 1}`,     // 高校名は後で差し替え想定
+    name: list?.[idx] ?? `${groupKey}校${idx + 1}`,
     groupKey,
     facilityLevel: lv,
-    upperGradeBonus: upperBonus,         // デバッグ用（後で消してOK）
     athletes,
   };
 }
