@@ -8,26 +8,43 @@ const GROUP_FACILITY_LEVEL = {
   national: 4,
 };
 
-// 能力レンジ（今回は補正なしで同一レンジ。後で調整）
-const BASE_RANGE = { min: 30, max: 80 };
+// state.js と同じ分布（A案）
+function sampleByRanges(ranges) {
+  const r = Math.random() * 100;
+  if (r < 45) return randInt(ranges[0][0], ranges[0][1]);
+  if (r < 95) return randInt(ranges[1][0], ranges[1][1]);
+  return randInt(ranges[2][0], ranges[2][1]);
+}
+function rangesByGrade(grade) {
+  if (grade === 1) return [[1, 20], [21, 40], [41, 50]];
+  if (grade === 2) return [[11, 30], [31, 50], [51, 60]];
+  return [[21, 40], [41, 60], [61, 70]];
+}
+function makeAbilitiesByGrade(grade) {
+  const ranges = rangesByGrade(grade);
+  return {
+    sprint: sampleByRanges(ranges),
+    speed: sampleByRanges(ranges),
+    stamina: sampleByRanges(ranges),
+    toughness: sampleByRanges(ranges),
+    technique: sampleByRanges(ranges),
+  };
+}
 
-function makeAthlete() {
-  const { min, max } = BASE_RANGE;
+function makeAthlete(grade) {
   return {
     name: "相手選手",
-    abilities: {
-      sprint: randInt(min, max),
-      speed: randInt(min, max),
-      stamina: randInt(min, max),
-      toughness: randInt(min, max),
-      technique: randInt(min, max),
-    },
+    grade,
+    abilities: makeAbilitiesByGrade(grade),
   };
 }
 
 function makeSchool(groupKey, idx) {
   const athletes = [];
-  for (let i = 0; i < 15; i++) athletes.push(makeAthlete());
+  // 5人×3学年=15人
+  for (let i = 0; i < 5; i++) athletes.push(makeAthlete(1));
+  for (let i = 0; i < 5; i++) athletes.push(makeAthlete(2));
+  for (let i = 0; i < 5; i++) athletes.push(makeAthlete(3));
 
   const lv = GROUP_FACILITY_LEVEL[groupKey] ?? 1;
   return {
@@ -66,12 +83,15 @@ export function rivalsWeeklyTraining(state) {
   }
 }
 
-// 年度更新：簡略で5人入れ替え（設備Lvは保持）
+// 年度更新：相手校も学年構成を保ったまま入れ替え（設備Lvは保持）
 export function rivalsYearUpdate(state) {
   ensureRivals(state);
   for (const groupKey of Object.keys(state.rivals)) {
     for (const school of state.rivals[groupKey]) {
-      for (let i = 0; i < 5; i++) school.athletes[i] = makeAthlete();
+      // 各学年から数名ずつ入れ替える（合計5人）
+      for (let i = 0; i < 2; i++) school.athletes[i] = makeAthlete(1);
+      for (let i = 5; i < 7; i++) school.athletes[i] = makeAthlete(2);
+      school.athletes[10] = makeAthlete(3);
     }
   }
 }
