@@ -22,7 +22,7 @@ function runTeamTime(teamPicks) {
       athleteId: x.athlete?.id ?? null,
       grade: x.athlete?.grade ?? null,
 
-      athleteName: x.athlete.name,
+      athleteName: x.athlete?.name ?? "",
       timeSec: t,
       timeText: formatTime(t, 1),
     };

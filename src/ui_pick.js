@@ -73,9 +73,6 @@ function renderRecordPicker(app, state, { onCancel, onConfirm }) {
       </div>
     `;
 
-    const recordList = app.querySelector('[data-scroll="record-list"]');
-    if (recordList) recordList.scrollTop = recordListScrollTop;
-
     app.querySelectorAll("input[type=radio]").forEach(r => {
       r.onchange = () => {
         const [_, id] = r.name.split("ev_");
@@ -93,6 +90,9 @@ function renderRecordPicker(app, state, { onCancel, onConfirm }) {
       onConfirm(arr);
     };
     document.querySelector("#cancel").onclick = () => onCancel();
+
+    const recordList = app.querySelector('[data-scroll="record-list"]');
+    if (recordList) recordList.scrollTop = recordListScrollTop;
   }
 
   draw();
@@ -233,9 +233,6 @@ function renderSoutaiPicker(app, state, {
       </div>
     `;
 
-    const alist = app.querySelector("#alist");
-    if (alist) alist.scrollTop = athleteListScrollTop;
-
     if (!readOnly) {
       app.querySelectorAll("button[data-add]").forEach(b => {
         b.onclick = () => {
@@ -266,6 +263,9 @@ function renderSoutaiPicker(app, state, {
 
     document.querySelector("#ok").onclick = () => { if (isValid()) onConfirm(picks.slice()); };
     document.querySelector("#cancel").onclick = () => onCancel();
+
+    const alist = app.querySelector("#alist");
+    if (alist) alist.scrollTop = athleteListScrollTop;
   }
 
   draw();
