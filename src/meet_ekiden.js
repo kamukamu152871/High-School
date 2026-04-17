@@ -20,6 +20,7 @@ function runTeamTime(teamPicks) {
 
       // ★追加：区間記録の重複排除に使う
       athleteId: x.athlete?.id ?? null,
+      grade: x.athlete?.grade ?? null,
 
       athleteName: x.athlete.name,
       timeSec: t,
