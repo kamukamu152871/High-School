@@ -7,12 +7,12 @@ import {
   NATIONAL_SCHOOLS,
 } from "./data/schools.js";
 
-// levelごとの固定能力レンジ（群とは独立）
-const LEVEL_ABILITY_RANGE = {
-  1: { min: 21, max: 50 },
-  2: { min: 41, max: 70 },
-  3: { min: 61, max: 90 },
-  4: { min: 81, max: 100 },
+// 3年生（基準）のレベル別レンジ
+const LEVEL_ABILITY_RANGE_G3 = {
+  1: { min: 21, max: 45 },
+  2: { min: 41, max: 65 },
+  3: { min: 61, max: 85 },
+  4: { min: 81, max: 95 },
 };
 
 function choice(arr) {
@@ -30,14 +30,25 @@ function schoolDefsByGroup(groupKey) {
   return NATIONAL_SCHOOLS;
 }
 
-function makeAbilitiesByLevel(level) {
-  const r = LEVEL_ABILITY_RANGE[level] ?? LEVEL_ABILITY_RANGE[1];
+function gradeOffset(grade) {
+  if (grade === 3) return 0;
+  if (grade === 2) return -10;
+  return -20; // grade 1
+}
+
+function makeAbilitiesByLevelAndGrade(level, grade) {
+  const base = LEVEL_ABILITY_RANGE_G3[level] ?? LEVEL_ABILITY_RANGE_G3[1];
+  const off = gradeOffset(grade);
+
+  const min = base.min + off;
+  const max = base.max + off;
+
   return {
-    sprint: clamp1to100(randInt(r.min, r.max)),
-    speed: clamp1to100(randInt(r.min, r.max)),
-    stamina: clamp1to100(randInt(r.min, r.max)),
-    toughness: clamp1to100(randInt(r.min, r.max)),
-    technique: clamp1to100(randInt(r.min, r.max)),
+    sprint: clamp1to100(randInt(min, max)),
+    speed: clamp1to100(randInt(min, max)),
+    stamina: clamp1to100(randInt(min, max)),
+    toughness: clamp1to100(randInt(min, max)),
+    technique: clamp1to100(randInt(min, max)),
   };
 }
 
@@ -45,7 +56,7 @@ function makeAthlete(level, grade) {
   return {
     name: randomFullName(),
     grade,
-    abilities: makeAbilitiesByLevel(level),
+    abilities: makeAbilitiesByLevelAndGrade(level, grade),
   };
 }
 
@@ -57,16 +68,16 @@ function makeSchool(groupKey, idx) {
   const level = def?.level ?? 1;
 
   const athletes = [];
-  // 5人×3学年=15人（学年は表示用。能力はlevel固定レンジ）
+  // 各学年5人＝計15人
   for (let i = 0; i < 5; i++) athletes.push(makeAthlete(level, 1));
   for (let i = 0; i < 5; i++) athletes.push(makeAthlete(level, 2));
   for (let i = 0; i < 5; i++) athletes.push(makeAthlete(level, 3));
 
   return {
     name,
-    groupKey,           // 大会参加の群
-    level,              // 強さ（能力レンジ/設備Lvの基準）
-    facilityLevel: level, // ★YES：設備Lvもlevelと同じ
+    groupKey,              // 大会参加の群
+    level,                 // 強さ（能力レンジ/設備Lvの基準）
+    facilityLevel: level,  // 設備Lvもlevelと同じ
     athletes,
   };
 }
@@ -82,22 +93,55 @@ export function ensureRivals(state) {
   };
 }
 
-// ★固定能力にするので何もしない（裏成長なし）
+// 週の裏成長は無し（進級時だけ+10で成長）
 export function rivalsWeeklyTraining(state) {
   ensureRivals(state);
 }
 
-// 年度更新：入れ替えはするがレベルレンジは固定（裏成長なし）
+function add10AllAbilities(a) {
+  a.abilities.sprint = clamp1to100((a.abilities.sprint ?? 0) + 10);
+  a.abilities.speed = clamp1to100((a.abilities.speed ?? 0) + 10);
+  a.abilities.stamina = clamp1to100((a.abilities.stamina ?? 0) + 10);
+  a.abilities.toughness = clamp1to100((a.abilities.toughness ?? 0) + 10);
+  a.abilities.technique = clamp1to100((a.abilities.technique ?? 0) + 10);
+}
+
+// 年度更新：3年引退→進級（能力+10）→新1年生生成
 export function rivalsYearUpdate(state) {
   ensureRivals(state);
+
   for (const groupKey of Object.keys(state.rivals)) {
     for (const school of state.rivals[groupKey]) {
       const level = school.level ?? 1;
 
-      // 例：5人入れ替え（1年2人、2年2人、3年1人）
-      for (let i = 0; i < 2; i++) school.athletes[i] = makeAthlete(level, 1);
-      for (let i = 5; i < 7; i++) school.athletes[i] = makeAthlete(level, 2);
-      school.athletes[10] = makeAthlete(level, 3);
+      const current = (school.athletes ?? []).slice();
+
+      const g1 = current.filter(x => x.grade === 1);
+      const g2 = current.filter(x => x.grade === 2);
+      const g3 = current.filter(x => x.grade === 3);
+
+      // 3年は引退（捨てる）
+      void (g3);
+
+      // 2年→3年（+10）
+      const nextG3 = g2.slice(0, 5).map(a => {
+        const b = { ...a, grade: 3, abilities: { ...(a.abilities ?? {}) } };
+        add10AllAbilities(b);
+        return b;
+      });
+
+      // 1年→2年（+10）
+      const nextG2 = g1.slice(0, 5).map(a => {
+        const b = { ...a, grade: 2, abilities: { ...(a.abilities ?? {}) } };
+        add10AllAbilities(b);
+        return b;
+      });
+
+      // 新1年 5人（レンジ生成）
+      const nextG1 = Array.from({ length: 5 }, () => makeAthlete(level, 1));
+
+      // 1年→2年→3年の順で格納
+      school.athletes = nextG1.concat(nextG2, nextG3);
     }
   }
 }
