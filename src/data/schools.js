@@ -29,7 +29,7 @@ export const PREFECTURE_SCHOOLS = [
   { name: "報徳学園高校", level: 3 },
   { name: "市立尼崎高校", level: 2 },
   { name: "県立西宮高校", level: 2 },
-  { name: "市立西宮高校", level: 2 },
+  { name: "市立西宮高校", level: 3},
   { name: "県立伊丹高校", level: 2 },
   { name: "明石高校", level: 1 },
   { name: "明石北高校", level: 2 },
@@ -51,7 +51,7 @@ export const PREFECTURE_SCHOOLS = [
 // 近畿
 export const REGION_SCHOOLS = [
   { name: "洛南高校", level: 4 },
-  { name: "智辯学園高校", level: 4 },
+  { name: "智辯学園高校", level: 3 },
   { name: "智辯和歌山高校", level: 4 },
 
   { name: "東海大仰星高校", level: 3 },
