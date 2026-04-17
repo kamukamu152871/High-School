@@ -494,7 +494,6 @@ function renderScout(state) {
 
       <div class="row" style="margin-top:12px;">
         <button id="ok">決定</button>
-        <button class="secondary" id="reroll">候補を作り直す</button>
       </div>
 
       <p id="count" style="margin-top:10px; color:#555;"></p>
@@ -517,13 +516,6 @@ function renderScout(state) {
     cb.onchange = () => updateCount();
   });
   updateCount();
-
-  document.querySelector("#reroll").onclick = () => {
-    state.scout.pool = Array.from({ length: 10 }, (_, i) => createScoutFreshman(i));
-    state.scout.selected = [];
-    saveGame(state);
-    renderScout(state);
-  };
 
   document.querySelector("#ok").onclick = () => {
     const selectedIdx = Array.from(app.querySelectorAll("input[data-scout]"))

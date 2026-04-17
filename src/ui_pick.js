@@ -16,6 +16,7 @@ function athleteLabel(a) { return `${a.grade}年 ${a.name}（${a.personality} / 
 function renderRecordPicker(app, state, { onCancel, onConfirm }) {
   const events = ["1500", "3000", "5000"];
   const picks = new Map(); // athlete.id -> event
+  let recordListScrollTop = 0;
 
   function applyRecommended() {
     const rec = recommendRecordPicks(state.athletes);
@@ -27,6 +28,9 @@ function renderRecordPicker(app, state, { onCancel, onConfirm }) {
   }
 
   function draw() {
+    const prevList = app.querySelector('[data-scroll="record-list"]');
+    if (prevList) recordListScrollTop = prevList.scrollTop;
+
     const rows = state.athletes.map(a => {
       const current = picks.get(a.id) ?? "";
       const options = events.map(ev => `
@@ -54,7 +58,7 @@ function renderRecordPicker(app, state, { onCancel, onConfirm }) {
           ${smallBtn("全解除", "clear")}
         </div>
 
-        <div style="max-height:55vh; overflow:auto; border:1px solid #eee; border-radius:8px;">
+        <div data-scroll="record-list" style="max-height:55vh; overflow:auto; border:1px solid #eee; border-radius:8px;">
           ${rows}
         </div>
 
@@ -86,6 +90,9 @@ function renderRecordPicker(app, state, { onCancel, onConfirm }) {
       onConfirm(arr);
     };
     document.querySelector("#cancel").onclick = () => onCancel();
+
+    const recordList = app.querySelector('[data-scroll="record-list"]');
+    if (recordList) recordList.scrollTop = recordListScrollTop;
   }
 
   draw();
@@ -101,6 +108,7 @@ function renderSoutaiPicker(app, state, {
   onConfirm
 }) {
   const events = allowedEvents ?? EVENTS_MEET;
+  let athleteListScrollTop = 0;
 
   // picks：表示用。readOnlyなら fixedPicks を表示
   const picks = [];
@@ -155,6 +163,9 @@ function renderSoutaiPicker(app, state, {
   }
 
   function draw() {
+    const prevAList = app.querySelector("#alist");
+    if (prevAList) athleteListScrollTop = prevAList.scrollTop;
+
     const eventBlocks = events.map(ev => {
       const pickedHere = picks.filter(p => p.event === ev);
 
@@ -252,6 +263,9 @@ function renderSoutaiPicker(app, state, {
 
     document.querySelector("#ok").onclick = () => { if (isValid()) onConfirm(picks.slice()); };
     document.querySelector("#cancel").onclick = () => onCancel();
+
+    const alist = app.querySelector("#alist");
+    if (alist) alist.scrollTop = athleteListScrollTop;
   }
 
   draw();
