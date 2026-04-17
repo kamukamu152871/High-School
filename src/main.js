@@ -133,6 +133,8 @@ function updateRecordsFromSoutai(state, result) {
       const entry = {
         athleteId: x.athlete?.id ?? `${x.athlete?.name ?? "unknown"}`,
         athleteName: x.athlete?.name ?? "",
+        grade: x.athlete?.grade ?? null,        // ★当時学年
+        schoolYear: state.year ?? null,         // ★何年目
         timeSec: x.timeSec,
         timeText: x.timeText,
         when: result.when,
@@ -153,6 +155,8 @@ function updateRecordsFromRecordMeet(state, result) {
       const entry = {
         athleteId: x.athlete?.id ?? `${x.athlete?.name ?? "unknown"}`,
         athleteName: x.athlete?.name ?? "",
+        grade: x.athlete?.grade ?? null,        // ★当時学年
+        schoolYear: state.year ?? null,         // ★何年目
         timeSec: x.timeSec,
         timeText: x.timeText,
         when: result.when,
@@ -170,7 +174,12 @@ function updateRecordsFromEkiden(state, result) {
 
   state.records.ekidenTotal = pushTop10(
     state.records.ekidenTotal,
-    { totalSec: my.totalSec, totalText: my.totalText, when: result.when },
+    {
+      totalSec: my.totalSec,
+      totalText: my.totalText,
+      schoolYear: state.year ?? null,          // ★何年目
+      when: result.when
+    },
     "totalSec"
   );
 
@@ -179,6 +188,8 @@ function updateRecordsFromEkiden(state, result) {
     const entry = {
       athleteId: leg.athleteId ?? leg.athleteName,
       athleteName: leg.athleteName,
+      grade: leg.grade ?? null,                // ★当時学年（無い場合null）
+      schoolYear: state.year ?? null,          // ★何年目
       timeSec: leg.timeSec,
       timeText: leg.timeText,
       when: result.when,
@@ -301,6 +312,13 @@ function computeScoutMaxByEkiden(state) {
 function renderRecords(state) {
   ensureRecords(state);
 
+  const fmtMeta = (r) => {
+    const g = (r.grade == null) ? "?" : `${r.grade}年`;
+    const y = (r.schoolYear == null) ? "?" : `${r.schoolYear}年目`;
+    const w = r.when ?? "";
+    return `${g} / ${y} ${w}`.trim();
+  };
+
   const evOrder = [
     { key: "800", label: "800m" },
     { key: "1500", label: "1500m" },
@@ -317,7 +335,7 @@ function renderRecords(state) {
         <td>${i + 1}</td>
         <td>${r.athleteName}</td>
         <td>${r.timeText}</td>
-        <td style="color:#777;">${r.when}</td>
+        <td style="color:#777;">${fmtMeta(r)}</td>
       </tr>
     `).join("") || `<tr><td colspan="4" style="color:#777;">記録なし</td></tr>`;
 
@@ -341,7 +359,7 @@ function renderRecords(state) {
         <td>${i + 1}</td>
         <td>${r.athleteName}</td>
         <td>${r.timeText}</td>
-        <td style="color:#777;">${r.when}</td>
+        <td style="color:#777;">${fmtMeta(r)}</td>
       </tr>
     `).join("") || `<tr><td colspan="4" style="color:#777;">記録なし</td></tr>`;
 
@@ -362,7 +380,7 @@ function renderRecords(state) {
     <tr>
       <td>${i + 1}</td>
       <td>${r.totalText}</td>
-      <td style="color:#777;">${r.when}</td>
+      <td style="color:#777;">${(r.schoolYear == null ? "?" : `${r.schoolYear}年目`)} ${r.when ?? ""}</td>
     </tr>
   `).join("") || `<tr><td colspan="3" style="color:#777;">記録なし</td></tr>`;
 
@@ -557,7 +575,7 @@ function renderTitle() {
       </div>
 
       <p style="margin-top:12px;color:#555;">端末内（ブラウザ）に自動でセーブされます。</p>
-      <p style="margin-top:8px;color:#b00;">※大きく仕様変更したので、最初は「セーブ削除」を推奨します。</p>
+     
     </div>
   `;
 
@@ -792,6 +810,10 @@ function renderRenameTeam(state) {
   document.querySelector("#cancel").onclick = () => renderHome(state);
 }
 
+/**
+ * ヘルプはあとで書き換えるとのことなので仮実装です。
+ * あなたの任意の内容に差し替えてOK。
+ */
 function renderHelp(state) {
   app.innerHTML = `
     <div class="card">
@@ -893,6 +915,7 @@ function renderHelp(state) {
   `;
   document.querySelector("#back").onclick = () => renderHome(state);
 }
+
 function renderFacilities(state) {
   ensureFacilities(state);
   const f = state.facilities;
