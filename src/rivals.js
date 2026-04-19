@@ -7,10 +7,13 @@ import {
   NATIONAL_SCHOOLS,
 } from "./data/schools.js";
 
-const GRADE_ABILITY_RANGE = {
-  1: { min: 65, max: 85 },
-  2: { min: 75, max: 95 },
-  3: { min: 85, max: 105 },
+// 3年生（基準）のレベル別レンジ（案B）
+// ※レベル5追加は保留
+const LEVEL_ABILITY_RANGE_G3 = {
+  1: { min: 21, max: 45 },
+  2: { min: 41, max: 65 },
+  3: { min: 61, max: 85 },
+  4: { min: 81, max: 95 },
 };
 
 function choice(arr) {
@@ -28,11 +31,17 @@ function schoolDefsByGroup(groupKey) {
   return NATIONAL_SCHOOLS;
 }
 
+function gradeOffset(grade) {
+  if (grade === 3) return 0;
+  if (grade === 2) return -10;
+  return -20;
+}
+
 function makeAbilitiesByLevelAndGrade(level, grade) {
-  void level; // レベル5追加は保留。現時点では学年レンジのみ使用
-  const base = GRADE_ABILITY_RANGE[grade] ?? GRADE_ABILITY_RANGE[1];
-  const min = base.min;
-  const max = base.max;
+  const base = LEVEL_ABILITY_RANGE_G3[level] ?? LEVEL_ABILITY_RANGE_G3[1];
+  const off = gradeOffset(grade);
+  const min = base.min + off;
+  const max = base.max + off;
 
   return {
     sprint: clamp1to110(randInt(min, max)),

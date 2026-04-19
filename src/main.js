@@ -471,6 +471,10 @@ function renderRecords(state) {
 function renderAchievements(state) {
   ensureAchievements(state);
   const stages = ["district", "prefecture", "region", "national"];
+  const count = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
   const stageLabel = (st) =>
     st === "district" ? "地区" :
     st === "prefecture" ? "県" :
@@ -480,23 +484,23 @@ function renderAchievements(state) {
   const soutaiRows = stages.map(st => `
     <tr>
       <td>${stageLabel(st)}</td>
-      ${soutaiEvents.map(ev => `<td>${state.achievements.soutaiWins[st][ev]}</td>`).join("")}
+      ${soutaiEvents.map(ev => `<td>${count(state.achievements.soutaiWins[st][ev])}</td>`).join("")}
     </tr>
   `).join("");
 
   const ekidenWinRows = stages.map(st => `
-    <tr><td>${stageLabel(st)}</td><td>${state.achievements.ekidenWins[st]}</td></tr>
+    <tr><td>${stageLabel(st)}</td><td>${count(state.achievements.ekidenWins[st])}</td></tr>
   `).join("");
 
   const legRows = stages.map(st => `
     <tr>
       <td>${stageLabel(st)}</td>
-      ${[1,2,3,4,5,6,7].map(leg => `<td>${state.achievements.ekidenLegAwards[st][String(leg)]}</td>`).join("")}
+      ${[1,2,3,4,5,6,7].map(leg => `<td>${count(state.achievements.ekidenLegAwards[st][String(leg)])}</td>`).join("")}
     </tr>
   `).join("");
 
   const newcomerLegRow = [1,2,3,4,5,6,7]
-    .map(leg => `<td>${state.achievements.newcomerEkidenLegAwards[String(leg)]}</td>`)
+    .map(leg => `<td>${count(state.achievements.newcomerEkidenLegAwards[String(leg)])}</td>`)
     .join("");
 
   app.innerHTML = `
@@ -535,7 +539,7 @@ function renderAchievements(state) {
       <div style="overflow:auto;">
         <table style="width:100%; border-collapse:collapse; min-width:360px;">
           <thead><tr><th>項目</th><th>回数</th></tr></thead>
-          <tbody><tr><td>優勝</td><td>${state.achievements.newcomerEkidenWins}</td></tr></tbody>
+          <tbody><tr><td>優勝</td><td>${count(state.achievements.newcomerEkidenWins)}</td></tr></tbody>
         </table>
       </div>
       <div style="overflow:auto; margin-top:8px;">
