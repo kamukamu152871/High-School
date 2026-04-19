@@ -5,6 +5,13 @@ export function renderPicker(app, mode, state, context) {
   if (mode === "record") return renderRecordPicker(app, state, context);
   if (mode === "soutai") return renderSoutaiPicker(app, state, context);
   if (mode === "ekiden") return renderEkidenPicker(app, state, context);
+  if (mode === "newcomer_ekiden") {
+    return renderEkidenPicker(app, state, {
+      ...context,
+      title: "出場選出：新人駅伝",
+      excludeGrade3: true,
+    });
+  }
   throw new Error("unknown picker mode");
 }
 
@@ -272,7 +279,7 @@ function renderSoutaiPicker(app, state, {
 }
 
 // ===== 駅伝 =====
-function renderEkidenPicker(app, state, { onCancel, onConfirm }) {
+function renderEkidenPicker(app, state, { onCancel, onConfirm, title = "出場選出：駅伝", excludeGrade3 = false }) {
   const sections = [
     { leg: 1, event: "10000" },
     { leg: 2, event: "3000" },
@@ -285,8 +292,12 @@ function renderEkidenPicker(app, state, { onCancel, onConfirm }) {
 
   const picks = new Map(); // leg -> athleteId
 
+  const candidates = excludeGrade3
+    ? state.athletes.filter(a => a.grade !== 3)
+    : state.athletes;
+
   function applyRecommended() {
-    const rec = recommendEkidenPicks(state.athletes);
+    const rec = recommendEkidenPicks(candidates);
     for (const r of rec) picks.set(r.leg, r.athlete.id);
   }
 
@@ -302,7 +313,7 @@ function renderEkidenPicker(app, state, { onCancel, onConfirm }) {
 
     const secBlocks = sections.map(s => {
       const cur = picks.get(s.leg) ?? "";
-      const options = state.athletes.map(a => {
+      const options = candidates.map(a => {
         const disabled = (used.has(a.id) && a.id !== cur) ? "disabled" : "";
         return `<option value="${a.id}" ${a.id === cur ? "selected" : ""} ${disabled}>${athleteLabel(a)}</option>`;
       }).join("");
@@ -319,9 +330,9 @@ function renderEkidenPicker(app, state, { onCancel, onConfirm }) {
     }).join("");
 
     app.innerHTML = `
-      <div class="card">
-        <h2>出場選出：駅伝</h2>
-        <p style="color:#555;">1〜7区に選手を1人ずつ（重複なし）</p>
+        <div class="card">
+        <h2>${title}</h2>
+        <p style="color:#555;">1〜7区に選手を1人ずつ（重複なし）${excludeGrade3 ? " / 3年生は選出不可" : ""}</p>
 
         <div class="row" style="margin-top:8px;">
           ${btn("おすすめ", "rec")}
@@ -360,7 +371,7 @@ function renderEkidenPicker(app, state, { onCancel, onConfirm }) {
       if (!isValid()) return;
       const arr = sections.map(s => {
         const aid = picks.get(s.leg);
-        const a = state.athletes.find(x => x.id === aid);
+        const a = candidates.find(x => x.id === aid);
         return { leg: s.leg, event: s.event, athlete: a };
       });
       onConfirm(arr);
