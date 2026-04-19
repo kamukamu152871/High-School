@@ -22,21 +22,25 @@ export const TRAININGS = [
 ];
 
 export function personalityBonus(personality, stat) {
-  if (personality === "てんさい") return 1;
-  if (personality === "ふつう") return 0.5;
+  if (personality === "ふつう") return 0;
+  if (personality === "てんさい") return 0.25;
 
   const map = {
-    "たんき": "sprint",
-    "せっかち": "speed",
-    "おおらか": "stamina",
-    "がんこ": "toughness",
-    "きよう": "technique",
+    "たんき": { preferred: "sprint", weak: "toughness" },
+    "せっかち": { preferred: "speed", weak: "stamina" },
+    "おおらか": { preferred: "stamina", weak: "sprint" },
+    "がんこ": { preferred: "toughness", weak: "technique" },
+    "きよう": { preferred: "technique", weak: "speed" },
   };
-  return map[personality] === stat ? 1: 0;
+  const m = map[personality];
+  if (!m) return 0;
+  if (m.preferred === stat) return 0.25;
+  if (m.weak === stat) return -0.25;
+  return 0;
 }
 
-export function clamp1to100(n) {
-  return Math.max(1, Math.min(100, n));
+export function clamp1to110(n) {
+  return Math.max(1, Math.min(110, n));
 }
 
 export function recalcOverall(a) {
@@ -68,7 +72,7 @@ export function applyTraining(state, trainingId) {
     const base = baseGainFromFacilityLevel(level);
     const bonus = personalityBonus(a.personality, t.stat);
 
-    a.abilities[t.stat] = clamp1to100(a.abilities[t.stat] + base + bonus);
+    a.abilities[t.stat] = clamp1to110(a.abilities[t.stat] + base + bonus);
     recalcOverall(a);
   }
 

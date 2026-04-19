@@ -110,13 +110,25 @@ function buildSplits(rankedTeams) {
 }
 
 // playerPicks: [{leg,event,athlete}] 7つ
-export function runEkiden(state, stageKey, playerPicks) {
-  const rivals = state.rivals?.[stageKey] ?? [];
+export function runEkiden(state, stageKey, playerPicks, options = {}) {
+  const type = options.type ?? "ekiden";
+  const title = options.title ?? stageTitle(stageKey);
+  const eligibleSchools = options.eligibleSchools ?? null;
+  const excludeGrade3 = !!options.excludeGrade3;
+
+  const eligibleSet = eligibleSchools ? new Set(eligibleSchools) : null;
+  const rivals = (state.rivals?.[stageKey] ?? []).filter(s => {
+    if (!eligibleSet) return true;
+    return eligibleSet.has(s.name);
+  });
 
   const player = runTeamTime(playerPicks);
 
   const others = rivals.map(s => {
-    const picks = recommendEkidenPicks(s.athletes);
+    const athletes = excludeGrade3
+      ? (s.athletes ?? []).filter(a => a.grade !== 3)
+      : (s.athletes ?? []);
+    const picks = recommendEkidenPicks(athletes);
     const res = runTeamTime(picks);
     return { school: s.name, isPlayer: false, schoolObj: s, ...res };
   });
@@ -129,9 +141,9 @@ export function runEkiden(state, stageKey, playerPicks) {
   const ranked = all.map((x, i) => ({ ...x, rank: i + 1 }));
 
   const result = {
-    type: "ekiden",
+    type,
     stage: stageKey,
-    title: stageTitle(stageKey),
+    title,
     when: `${state.month}月${state.week}週`,
     ranking: ranked,
 
@@ -144,10 +156,10 @@ export function runEkiden(state, stageKey, playerPicks) {
 
   const my = ranked.find(x => x.isPlayer);
   result.myRank = my?.rank ?? 999;
-  result.cleared = result.myRank <= 5;
+  result.cleared = type === "ekiden" ? (result.myRank <= 5) : null;
 
   const toStage = nextStageKey(stageKey);
-  if (toStage) {
+  if (type === "ekiden" && toStage) {
     result.top5Teams = ranked.slice(0, 5).map(x => {
       if (x.isPlayer) {
         return {

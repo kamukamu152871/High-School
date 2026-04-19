@@ -5,6 +5,7 @@ import {
   clearSave,
   applyYearUpdateToState,
   createScoutFreshman,
+  ensureAchievements as ensureAchievementsState,
 } from "./state.js";
 
 import { TRAININGS, applyTraining } from "./rules.js";
@@ -32,6 +33,7 @@ function getMeetOfWeek(state) {
   if (state.month === 10 && state.week === 4) return { type: "ekiden", stage: "prefecture" };
   if (state.month === 11 && state.week === 2) return { type: "ekiden", stage: "region" };
   if (state.month === 12 && state.week === 3) return { type: "ekiden", stage: "national" };
+  if (state.month === 2 && state.week === 4) return { type: "newcomer_ekiden" };
 
   return null;
 }
@@ -95,6 +97,14 @@ function ensureRecords(state) {
   state.records.ekidenLegs ??= {};
   for (const leg of ["1", "2", "3", "4", "5", "6", "7"]) state.records.ekidenLegs[leg] ??= [];
   state.records.ekidenTotal ??= [];
+}
+
+function ensureAchievements(state) {
+  ensureAchievementsState(state);
+  state.newcomerEkiden ??= { eligibleSchools: [], top10: [], sourceWhen: null };
+  state.newcomerEkiden.eligibleSchools ??= [];
+  state.newcomerEkiden.top10 ??= [];
+  state.newcomerEkiden.sourceWhen ??= null;
 }
 
 // 速いほど良い（timeSecが小さいほど上）
@@ -199,6 +209,34 @@ function updateRecordsFromEkiden(state, result) {
   }
 }
 
+function updateAchievementsFromSoutai(state, stageKey, result) {
+  ensureAchievements(state);
+  for (const ev of ["800", "1500", "3000sc", "5000", "5000w"]) {
+    const er = result.events?.[ev];
+    if (!er) continue;
+    const ranked = er.type === "withFinal" ? (er.final ?? []) : (er.overall ?? []);
+    if (ranked[0]?.isPlayer) state.achievements.soutaiWins[stageKey][ev] += 1;
+  }
+}
+
+function updateAchievementsFromEkiden(state, stageKey, result, category = "ekiden") {
+  ensureAchievements(state);
+  const isNewcomer = category === "newcomer_ekiden";
+
+  if (result.myRank === 1) {
+    if (isNewcomer) state.achievements.newcomerEkidenWins += 1;
+    else state.achievements.ekidenWins[stageKey] += 1;
+  }
+
+  for (const sp of (result.splits ?? [])) {
+    const r = (sp.rows ?? []).find(x => x.isPlayer);
+    if (!r || r.legRank !== 1) continue;
+    const key = String(sp.leg);
+    if (isNewcomer) state.achievements.newcomerEkidenLegAwards[key] += 1;
+    else state.achievements.ekidenLegAwards[stageKey][key] += 1;
+  }
+}
+
 // ---- carry を次大会の rivals に混ぜ込む ----
 function buildSoutaiRivalsWithCarry(state, stageKey) {
   ensureRivals(state);
@@ -272,11 +310,29 @@ function canEnterEkiden(state, stageKey) {
   return false;
 }
 
+function canEnterNewcomerEkiden(state) {
+  ensureAchievements(state);
+  return (state.newcomerEkiden.eligibleSchools ?? []).includes(state.teamName);
+}
+
 function renderEkidenNotQualified(state, stageKey) {
   app.innerHTML = `
     <div class="card">
       <h2>${stageTitleEkiden(stageKey)}</h2>
       <p style="color:#b00;">出場条件を満たしていないため出場できません（前大会で5位以内が必要）。</p>
+      <div class="row" style="margin-top:14px;">
+        <button id="ok">OK（次の週へ）</button>
+      </div>
+    </div>
+  `;
+  document.querySelector("#ok").onclick = () => goNextWeek(state);
+}
+
+function renderNewcomerEkidenNotQualified(state) {
+  app.innerHTML = `
+    <div class="card">
+      <h2>新人駅伝</h2>
+      <p style="color:#b00;">出場条件を満たしていないため出場できません（直近の全国駅伝で10位以内が必要）。</p>
       <div class="row" style="margin-top:14px;">
         <button id="ok">OK（次の週へ）</button>
       </div>
@@ -400,6 +456,98 @@ function renderRecords(state) {
             <tr><th>順位</th><th>総合タイム</th><th>日時</th></tr>
           </thead>
           <tbody>${totalRows}</tbody>
+        </table>
+      </div>
+
+      <div class="row" style="margin-top:14px;">
+        <button class="secondary" id="back">戻る</button>
+      </div>
+    </div>
+  `;
+
+  document.querySelector("#back").onclick = () => renderHome(state);
+}
+
+function renderAchievements(state) {
+  ensureAchievements(state);
+  const stages = ["district", "prefecture", "region", "national"];
+  const count = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+  const stageLabel = (st) =>
+    st === "district" ? "地区" :
+    st === "prefecture" ? "県" :
+    st === "region" ? "地域" : "全国";
+
+  const soutaiEvents = ["800", "1500", "3000sc", "5000", "5000w"];
+  const soutaiRows = stages.map(st => `
+    <tr>
+      <td>${stageLabel(st)}</td>
+      ${soutaiEvents.map(ev => `<td>${count(state.achievements.soutaiWins[st][ev])}</td>`).join("")}
+    </tr>
+  `).join("");
+
+  const ekidenWinRows = stages.map(st => `
+    <tr><td>${stageLabel(st)}</td><td>${count(state.achievements.ekidenWins[st])}</td></tr>
+  `).join("");
+
+  const legRows = stages.map(st => `
+    <tr>
+      <td>${stageLabel(st)}</td>
+      ${[1,2,3,4,5,6,7].map(leg => `<td>${count(state.achievements.ekidenLegAwards[st][String(leg)])}</td>`).join("")}
+    </tr>
+  `).join("");
+
+  const newcomerLegRow = [1,2,3,4,5,6,7]
+    .map(leg => `<td>${count(state.achievements.newcomerEkidenLegAwards[String(leg)])}</td>`)
+    .join("");
+
+  app.innerHTML = `
+    <div class="card">
+      <h2>実績</h2>
+
+      <h3 style="margin-top:14px;">総体 優勝回数（1位）</h3>
+      <div style="overflow:auto;">
+        <table style="width:100%; border-collapse:collapse; min-width:720px;">
+          <thead>
+            <tr><th>大会</th><th>800</th><th>1500</th><th>3000SC</th><th>5000</th><th>5000W</th></tr>
+          </thead>
+          <tbody>${soutaiRows}</tbody>
+        </table>
+      </div>
+
+      <h3 style="margin-top:14px;">駅伝 優勝回数（総合1位）</h3>
+      <div style="overflow:auto;">
+        <table style="width:100%; border-collapse:collapse; min-width:360px;">
+          <thead><tr><th>大会</th><th>回数</th></tr></thead>
+          <tbody>${ekidenWinRows}</tbody>
+        </table>
+      </div>
+
+      <h3 style="margin-top:14px;">駅伝 区間賞（区間1位）</h3>
+      <div style="overflow:auto;">
+        <table style="width:100%; border-collapse:collapse; min-width:720px;">
+          <thead>
+            <tr><th>大会</th><th>1区</th><th>2区</th><th>3区</th><th>4区</th><th>5区</th><th>6区</th><th>7区</th></tr>
+          </thead>
+          <tbody>${legRows}</tbody>
+        </table>
+      </div>
+
+      <h3 style="margin-top:14px;">新人駅伝</h3>
+      <div style="overflow:auto;">
+        <table style="width:100%; border-collapse:collapse; min-width:360px;">
+          <thead><tr><th>項目</th><th>回数</th></tr></thead>
+          <tbody><tr><td>優勝</td><td>${count(state.achievements.newcomerEkidenWins)}</td></tr></tbody>
+        </table>
+      </div>
+      <div style="overflow:auto; margin-top:8px;">
+        <table style="width:100%; border-collapse:collapse; min-width:720px;">
+          <thead>
+            <tr><th>区間賞</th><th>1区</th><th>2区</th><th>3区</th><th>4区</th><th>5区</th><th>6区</th><th>7区</th></tr>
+          </thead>
+          <tbody><tr><td>回数</td>${newcomerLegRow}</tr></tbody>
         </table>
       </div>
 
@@ -583,6 +731,7 @@ function renderTitle() {
     ensureCarry(state);
     ensureScout(state);
     ensureRecords(state);
+    ensureAchievements(state);
     saveGame(state);
     renderHome(state);
   };
@@ -596,6 +745,7 @@ function renderTitle() {
       ensureCarry(state);
       ensureScout(state);
       ensureRecords(state);
+      ensureAchievements(state);
       saveGame(state);
       renderHome(state);
     }
@@ -615,7 +765,9 @@ function renderHome(state) {
       ? "この週は【記録会】（練習後に出場選出→実行）"
       : meet.type === "soutai"
         ? `この週は【${stageTitleSoutai(meet.stage)}】（練習後に出場選出→実行）`
-        : `この週は【${stageTitleEkiden(meet.stage)}】（練習後に出場選出→実行）`
+        : meet.type === "ekiden"
+          ? `この週は【${stageTitleEkiden(meet.stage)}】（練習後に出場選出→実行）`
+          : "この週は【新人駅伝】（練習後に出場選出→実行）"
     : "この週は大会なし";
 
   const yearText = isYearUpdateWeek(state)
@@ -640,6 +792,7 @@ function renderHome(state) {
         <button id="athletes">選手</button>
         <button id="facilities">設備</button>
         <button id="records">記録</button>
+        <button id="achievements">実績</button>
         <button id="rename">学校名変更</button>
         <button id="help">ヘルプ</button>
         <button class="secondary" id="back">タイトルへ</button>
@@ -650,6 +803,7 @@ function renderHome(state) {
   document.querySelector("#athletes").onclick = () => renderAthletes(state);
   document.querySelector("#facilities").onclick = () => renderFacilities(state);
   document.querySelector("#records").onclick = () => renderRecords(state);
+  document.querySelector("#achievements").onclick = () => renderAchievements(state);
   document.querySelector("#rename").onclick = () => renderRenameTeam(state);
   document.querySelector("#help").onclick = () => renderHelp(state);
   document.querySelector("#back").onclick = () => renderTitle();
@@ -664,6 +818,7 @@ function renderHome(state) {
       ensureCarry(state);
       ensureScout(state);
       ensureRecords(state);
+      ensureAchievements(state);
 
       rivalsWeeklyTraining(state);
       applyTraining(state, id);
@@ -719,6 +874,7 @@ function renderHome(state) {
 
             // ★歴代保存（5種目）
             updateRecordsFromSoutai(state, result);
+            updateAchievementsFromSoutai(state, meet.stage, result);
 
             state.rivals[meet.stage] = original;
 
@@ -756,15 +912,68 @@ function renderHome(state) {
             if (meet.stage === "region") state.scout.lastEkidenTier = "region";
             if (meet.stage === "national") {
               state.scout.lastEkidenTier = (result.myRank === 1) ? "national_win" : "national";
+              ensureAchievements(state);
+              const top10 = (result.ranking ?? []).slice(0, 10).map(x => ({
+                school: x.school,
+                isPlayer: !!x.isPlayer,
+                schoolObj: x.schoolObj ?? null,
+              }));
+              state.newcomerEkiden.top10 = top10;
+              state.newcomerEkiden.eligibleSchools = top10.map(x => x.school);
+              state.newcomerEkiden.sourceWhen = result.when ?? null;
             }
 
             state.carry.ekiden.next = result.top5Teams ?? [];
 
             // ★歴代保存（区間＋総合）
             updateRecordsFromEkiden(state, result);
+            updateAchievementsFromEkiden(state, meet.stage, result, "ekiden");
 
             state.rivals[meet.stage] = original;
 
+            saveGame(state);
+            renderEkidenResult(state, result);
+          }
+        });
+        return;
+      }
+
+      if (meet.type === "newcomer_ekiden") {
+        if (!canEnterNewcomerEkiden(state)) {
+          renderNewcomerEkidenNotQualified(state);
+          return;
+        }
+
+        ensureAchievements(state);
+        const eligibleSchools = state.newcomerEkiden.eligibleSchools ?? [];
+        const top10 = state.newcomerEkiden.top10 ?? [];
+        const top10RivalNames = top10.filter(x => !x.isPlayer).map(x => x.school);
+
+        const original = state.rivals?.newcomer;
+        state.rivals.newcomer = top10RivalNames
+          .map(name => {
+            const fromTop10 = top10.find(x => x.school === name)?.schoolObj;
+            if (fromTop10) return fromTop10;
+            return (state.rivals?.national ?? []).find(s => s.name === name) ?? null;
+          })
+          .filter(Boolean);
+
+        renderPicker(app, "newcomer_ekiden", state, {
+          onCancel: () => {
+            state.rivals.newcomer = original;
+            renderHome(state);
+          },
+          onConfirm: (picks) => {
+            const result = runEkiden(state, "newcomer", picks, {
+              type: "newcomer_ekiden",
+              title: "新人駅伝",
+              excludeGrade3: true,
+              eligibleSchools,
+            });
+
+            updateAchievementsFromEkiden(state, "newcomer", result, "newcomer_ekiden");
+
+            state.rivals.newcomer = original;
             saveGame(state);
             renderEkidenResult(state, result);
           }
@@ -978,7 +1187,7 @@ function renderRecordResult(state, result) {
     const rows = result.playerOnly[ev].map(r => `
       <tr>
         <td>${r.overallRank}</td>
-        <td>${r.athlete.name}</td>
+        <td>${r.athlete.name}（${r.athlete.grade}年）</td>
         <td>${r.timeText}</td>
       </tr>
     `).join("");
@@ -1024,7 +1233,7 @@ function renderSoutaiResult(state, result) {
         <td>${i + 1}</td>
         <td>${x.school}</td>
         <td>${x.isPlayer ? "自校" : ""}</td>
-        <td>${x.athlete.name}</td>
+        <td>${x.athlete.name}（${x.athlete.grade}年）</td>
         <td>${x.timeText}</td>
       </tr>
     `).join("");
@@ -1059,6 +1268,7 @@ function renderSoutaiResult(state, result) {
           const shown = isFinalist ? er.final[finalRank] : x;
           return {
             athleteName: x.athlete?.name ?? "",
+            grade: x.athlete?.grade ?? null,
             overallRank: isFinalist ? (finalRank + 1) : (prelimRankMap.get(key) ?? "-"),
             timeText: shown.timeText,
             remark: isFinalist ? `決勝${finalRank + 1}位` : `予選${x.heat}組${x.rankInHeat}着`,
@@ -1075,6 +1285,7 @@ function renderSoutaiResult(state, result) {
         .filter(x => x.isPlayer)
         .map(x => ({
           athleteName: x.athlete?.name ?? "",
+          grade: x.athlete?.grade ?? null,
           overallRank: x.overallRank,
           timeText: x.timeText,
           remark: "-",
@@ -1084,7 +1295,7 @@ function renderSoutaiResult(state, result) {
     const playerTableRows = playerRows.map(r => `
       <tr>
         <td>${r.overallRank}</td>
-        <td>${r.athleteName}</td>
+        <td>${r.athleteName}（${r.grade ?? "?"}年）</td>
         <td>${r.timeText}</td>
         <td>${r.remark}</td>
       </tr>
@@ -1141,12 +1352,14 @@ function renderEkidenResult(state, result) {
     <tr>
       <td>${l.leg}</td>
       <td>${l.event}m</td>
-      <td>${l.athleteName}</td>
+      <td>${l.athleteName}（${l.grade ?? "?"}年）</td>
       <td>${l.timeText}</td>
     </tr>
   `).join("");
 
-  const q = `自校順位：${result.myRank}位 / 通過：${result.cleared ? "YES" : "NO"}（5位以内）`;
+  const q = result.type === "ekiden"
+    ? `自校順位：${result.myRank}位 / 通過：${result.cleared ? "YES" : "NO"}（5位以内）`
+    : `自校順位：${result.myRank}位`;
 
   const splitBlocks = (result.splits ?? []).map(sp => {
     const rows = (sp.rows ?? []).map(r => `
@@ -1228,6 +1441,11 @@ function runYearUpdate(state) {
 
   ensureScout(state);
   state.scout.lastEkidenTier = "none";
+
+  ensureAchievements(state);
+  state.newcomerEkiden.eligibleSchools = [];
+  state.newcomerEkiden.top10 = [];
+  state.newcomerEkiden.sourceWhen = null;
 }
 
 // --- ラベル ---

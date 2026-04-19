@@ -1,4 +1,4 @@
-import { clamp1to100, randInt } from "./rules.js";
+import { clamp1to110, randInt } from "./rules.js";
 import { FAMILY_NAMES, GIVEN_NAMES } from "./data/names.js";
 import {
   DISTRICT_SCHOOLS,
@@ -7,7 +7,8 @@ import {
   NATIONAL_SCHOOLS,
 } from "./data/schools.js";
 
-// 3年生（基準）のレベル別レンジ
+// 3年生（基準）のレベル別レンジ（案B）
+// ※レベル5追加は保留
 const LEVEL_ABILITY_RANGE_G3 = {
   1: { min: 21, max: 45 },
   2: { min: 41, max: 65 },
@@ -33,22 +34,21 @@ function schoolDefsByGroup(groupKey) {
 function gradeOffset(grade) {
   if (grade === 3) return 0;
   if (grade === 2) return -10;
-  return -20; // grade 1
+  return -20;
 }
 
 function makeAbilitiesByLevelAndGrade(level, grade) {
   const base = LEVEL_ABILITY_RANGE_G3[level] ?? LEVEL_ABILITY_RANGE_G3[1];
   const off = gradeOffset(grade);
-
   const min = base.min + off;
   const max = base.max + off;
 
   return {
-    sprint: clamp1to100(randInt(min, max)),
-    speed: clamp1to100(randInt(min, max)),
-    stamina: clamp1to100(randInt(min, max)),
-    toughness: clamp1to100(randInt(min, max)),
-    technique: clamp1to100(randInt(min, max)),
+    sprint: clamp1to110(randInt(min, max)),
+    speed: clamp1to110(randInt(min, max)),
+    stamina: clamp1to110(randInt(min, max)),
+    toughness: clamp1to110(randInt(min, max)),
+    technique: clamp1to110(randInt(min, max)),
   };
 }
 
@@ -99,11 +99,11 @@ export function rivalsWeeklyTraining(state) {
 }
 
 function add10AllAbilities(a) {
-  a.abilities.sprint = clamp1to100((a.abilities.sprint ?? 0) + 10);
-  a.abilities.speed = clamp1to100((a.abilities.speed ?? 0) + 10);
-  a.abilities.stamina = clamp1to100((a.abilities.stamina ?? 0) + 10);
-  a.abilities.toughness = clamp1to100((a.abilities.toughness ?? 0) + 10);
-  a.abilities.technique = clamp1to100((a.abilities.technique ?? 0) + 10);
+  a.abilities.sprint = clamp1to110((a.abilities.sprint ?? 0) + 10);
+  a.abilities.speed = clamp1to110((a.abilities.speed ?? 0) + 10);
+  a.abilities.stamina = clamp1to110((a.abilities.stamina ?? 0) + 10);
+  a.abilities.toughness = clamp1to110((a.abilities.toughness ?? 0) + 10);
+  a.abilities.technique = clamp1to110((a.abilities.technique ?? 0) + 10);
 }
 
 // 年度更新：3年引退→進級（能力+10）→新1年生生成

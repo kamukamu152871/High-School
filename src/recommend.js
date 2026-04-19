@@ -85,12 +85,14 @@ export function recommendEkidenPicks(athletes) {
   const picks = [];
 
   for (const s of sections) {
+    if (unused.size === 0) break;
     let best = null;
     let bestP = -Infinity;
     for (const a of unused) {
       const p = calcEventPower(a, s.event);
       if (p > bestP) { bestP = p; best = a; }
     }
+    if (!best) break;
     picks.push({ leg: s.leg, event: s.event, athlete: best });
     unused.delete(best);
   }

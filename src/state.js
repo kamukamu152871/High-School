@@ -130,6 +130,40 @@ function ensureRecords(state) {
   state.records.ekidenTotal ??= [];
 }
 
+export function ensureAchievements(state) {
+  const soutaiStages = ["district", "prefecture", "region", "national"];
+  const ekidenStages = ["district", "prefecture", "region", "national"];
+  const events = ["800", "1500", "3000sc", "5000", "5000w"];
+  const legs = ["1", "2", "3", "4", "5", "6", "7"];
+
+  state.achievements ??= {
+    soutaiWins: {},
+    ekidenWins: {},
+    ekidenLegAwards: {},
+    newcomerEkidenWins: 0,
+    newcomerEkidenLegAwards: {},
+  };
+
+  state.achievements.soutaiWins ??= {};
+  for (const st of soutaiStages) {
+    state.achievements.soutaiWins[st] ??= {};
+    for (const ev of events) state.achievements.soutaiWins[st][ev] ??= 0;
+  }
+
+  state.achievements.ekidenWins ??= {};
+  for (const st of ekidenStages) state.achievements.ekidenWins[st] ??= 0;
+
+  state.achievements.ekidenLegAwards ??= {};
+  for (const st of ekidenStages) {
+    state.achievements.ekidenLegAwards[st] ??= {};
+    for (const leg of legs) state.achievements.ekidenLegAwards[st][leg] ??= 0;
+  }
+
+  state.achievements.newcomerEkidenWins ??= 0;
+  state.achievements.newcomerEkidenLegAwards ??= {};
+  for (const leg of legs) state.achievements.newcomerEkidenLegAwards[leg] ??= 0;
+}
+
 export function createNewGameState() {
   const state = {
     year: 1,
@@ -186,10 +220,13 @@ export function createNewGameState() {
       ekidenLegs: { "1": [], "2": [], "3": [], "4": [], "5": [], "6": [], "7": [] },
       ekidenTotal: [],
     },
+    achievements: {},
+    newcomerEkiden: { eligibleSchools: [], top10: [], sourceWhen: null },
   };
 
   ensureScout(state);
   ensureRecords(state);
+  ensureAchievements(state);
   return state;
 }
 
@@ -225,6 +262,12 @@ export function loadGame() {
 
     // ★歴代記録救済
     ensureRecords(state);
+    ensureAchievements(state);
+
+    state.newcomerEkiden ??= { eligibleSchools: [], top10: [], sourceWhen: null };
+    state.newcomerEkiden.eligibleSchools ??= [];
+    state.newcomerEkiden.top10 ??= [];
+    state.newcomerEkiden.sourceWhen ??= null;
 
     return state;
   } catch {
