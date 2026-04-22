@@ -1,34 +1,67 @@
-import { clamp1to110, randInt } from "./rules.js";
+// 相手校・世界データ生成（全面刷新）
+// - src/data/schools.js を唯一の編集点にする
+// - 各学校は { name, level(1..4), prefecture, districtKey?, districtName? } を保持
+// - 学校ごとに athletes(15人=各学年5人) を保持
+//
+// 選手生成仕様（あなた指定）
+// - 学校レベル(1..4) -> 生成される「選手レベル帯(1..8)」が変わる
+//   Lv1校: 選手Lv {1,2}
+//   Lv2校: 選手Lv {3,4}
+//   Lv3校: 選手Lv {5,6}
+//   Lv4校: 選手Lv {7,8}
+// - 選手Lv -> 能力値の生成範囲が変わる（下記参照）
+// - 進級で全能力 +10（上限110）
+// - 3年引退 -> 2->3, 1->2, 新1年(5人)追加
+
 import { FAMILY_NAMES, GIVEN_NAMES } from "./data/names.js";
+import { clamp1to110, recalcOverall } from "./rules.js";
 import {
-  DISTRICT_SCHOOLS,
-  PREFECTURE_SCHOOLS,
-  REGION_SCHOOLS,
-  NATIONAL_SCHOOLS,
+  allSchoolsJapan,
 } from "./data/schools.js";
 
-// 3年生（基準）のレベル別レンジ（案B）
-// ※レベル5追加は保留
-const LEVEL_ABILITY_RANGE_G3 = {
-  1: { min: 21, max: 45 },
-  2: { min: 41, max: 65 },
-  3: { min: 61, max: 85 },
-  4: { min: 81, max: 95 },
-};
-
+function randInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
 function choice(arr) {
   return arr[randInt(0, arr.length - 1)];
 }
-function randomFullName() {
+function createRandomName() {
   return `${choice(FAMILY_NAMES)} ${choice(GIVEN_NAMES)}`;
 }
 
-// groupKeyごとに schools.js の定義リストを返す
-function schoolDefsByGroup(groupKey) {
-  if (groupKey === "district") return DISTRICT_SCHOOLS;
-  if (groupKey === "prefecture") return PREFECTURE_SCHOOLS;
-  if (groupKey === "region") return REGION_SCHOOLS;
-  return NATIONAL_SCHOOLS;
+function createPersonality() {
+  // state.js と同じ：てんさい4%、他は各16%
+  const r = Math.random() * 100;
+  if (r < 16) return "たんき";
+  if (r < 32) return "せっかち";
+  if (r < 48) return "おおらか";
+  if (r < 64) return "がんこ";
+  if (r < 80) return "きよう";
+  if (r < 96) return "ふつう";
+  return "てんさい";
+}
+
+const ATHLETE_LEVEL_RANGE_G3 = {
+  1: { min: 21, max: 30 },
+  2: { min: 31, max: 40 },
+  3: { min: 41, max: 50 },
+  4: { min: 51, max: 60 },
+  5: { min: 61, max: 70 },
+  6: { min: 71, max: 80 },
+  7: { min: 81, max: 90 },
+  8: { min: 91, max: 100 },
+};
+
+function athleteLevelsBySchoolLevel(schoolLevel) {
+  if (schoolLevel === 1) return [1, 2];
+  if (schoolLevel === 2) return [3, 4];
+  if (schoolLevel === 3) return [5, 6];
+  return [7, 8]; // level 4
+}
+
+function sampleAthleteLevelForSchool(schoolLevel) {
+  const pool = athleteLevelsBySchoolLevel(schoolLevel);
+  return choice(pool);
 }
 
 function gradeOffset(grade) {
@@ -37,111 +70,125 @@ function gradeOffset(grade) {
   return -20;
 }
 
-function makeAbilitiesByLevelAndGrade(level, grade) {
-  const base = LEVEL_ABILITY_RANGE_G3[level] ?? LEVEL_ABILITY_RANGE_G3[1];
+function createAbilitiesForRival(grade, schoolLevel) {
+  const aLv = sampleAthleteLevelForSchool(schoolLevel);
+  const base = ATHLETE_LEVEL_RANGE_G3[aLv];
   const off = gradeOffset(grade);
-  const min = base.min + off;
-  const max = base.max + off;
+
+  const one = () => clamp1to110(randInt(base.min, base.max) + off);
 
   return {
-    sprint: clamp1to110(randInt(min, max)),
-    speed: clamp1to110(randInt(min, max)),
-    stamina: clamp1to110(randInt(min, max)),
-    toughness: clamp1to110(randInt(min, max)),
-    technique: clamp1to110(randInt(min, max)),
+    sprint: one(),
+    speed: one(),
+    stamina: one(),
+    toughness: one(),
+    technique: one(),
   };
 }
 
-function makeAthlete(level, grade) {
-  return {
-    name: randomFullName(),
+function createRivalAthlete(grade, index, schoolLevel) {
+  const abilities = createAbilitiesForRival(grade, schoolLevel);
+  const a = {
+    id: `r-${grade}-${index}-${crypto.randomUUID?.() ?? Math.random()}`,
     grade,
-    abilities: makeAbilitiesByLevelAndGrade(level, grade),
+    name: createRandomName(),
+    personality: createPersonality(),
+    abilities,
+    overall: 0,
+  };
+  recalcOverall(a);
+  return a;
+}
+
+function createRivalSchoolRoster(schoolLevel) {
+  const athletes = [];
+  for (let i = 0; i < 5; i++) athletes.push(createRivalAthlete(1, i, schoolLevel));
+  for (let i = 0; i < 5; i++) athletes.push(createRivalAthlete(2, i, schoolLevel));
+  for (let i = 0; i < 5; i++) athletes.push(createRivalAthlete(3, i, schoolLevel));
+  return athletes;
+}
+
+function snapshotSchoolBase(s) {
+  // schools.js から来る構造をそのまま保持しつつ、ゲーム内で必要なフィールドを安定化
+  return {
+    name: s.name,
+    level: s.level,
+    prefecture: s.prefecture ?? "",
+    districtKey: s.districtKey ?? null,
+    districtName: s.districtName ?? null,
   };
 }
 
-function makeSchool(groupKey, idx) {
-  const defs = schoolDefsByGroup(groupKey);
-  const def = defs?.[idx];
+// state.world.schools: Map相当を配列で保持（localStorage保存しやすい）
+function buildWorldSchools() {
+  const schools = allSchoolsJapan().map(s => ({
+    ...snapshotSchoolBase(s),
+    athletes: createRivalSchoolRoster(s.level),
+  }));
+  return schools;
+}
 
-  const name = def?.name ?? `${groupKey}校${idx + 1}`;
-  const level = def?.level ?? 1;
-
-  const athletes = [];
-  // 各学年5人＝計15人
-  for (let i = 0; i < 5; i++) athletes.push(makeAthlete(level, 1));
-  for (let i = 0; i < 5; i++) athletes.push(makeAthlete(level, 2));
-  for (let i = 0; i < 5; i++) athletes.push(makeAthlete(level, 3));
-
+// 互換：旧 main.js が state.rivals を参照しているため、最低限のダミーも作る。
+// （次の main.js 完全版で撤去/置換する）
+function buildLegacyRivalsStub(worldSchools) {
+  // 旧仕様の district/prefecture/region/national はここでは「適当」に入れておく（崩壊回避用）
+  // 本実装は main.js/meet_* 側で state.world を使うように作り替える。
+  const hyogo = worldSchools.filter(s => s.prefecture === "兵庫");
+  const kobe = hyogo.filter(s => s.districtKey === "kobe");
   return {
-    name,
-    groupKey,              // 大会参加の群
-    level,                 // 強さ（能力レンジ/設備Lvの基準）
-    facilityLevel: level,  // 設備Lvもlevelと同じ
-    athletes,
+    district: kobe.map(s => ({ name: s.name, athletes: s.athletes, facilityLevel: 1, groupKey: "kobe" })),
+    prefecture: hyogo.map(s => ({ name: s.name, athletes: s.athletes, facilityLevel: 1, groupKey: "hyogo" })),
+    region: [],   // 近畿は後で main/meet で完全再現
+    national: [], // 後で
+    newcomer: [],
   };
 }
 
 export function ensureRivals(state) {
-  if (state.rivals) return;
+  // 新世界データ
+  state.world ??= {};
+  state.world.schools ??= null;
 
-  state.rivals = {
-    district: Array.from({ length: 20 }, (_, i) => makeSchool("district", i)),
-    prefecture: Array.from({ length: 20 }, (_, i) => makeSchool("prefecture", i)),
-    region: Array.from({ length: 20 }, (_, i) => makeSchool("region", i)),
-    national: Array.from({ length: 20 }, (_, i) => makeSchool("national", i)),
-  };
+  if (!state.world.schools || !Array.isArray(state.world.schools) || state.world.schools.length === 0) {
+    state.world.schools = buildWorldSchools();
+  }
+
+  // 旧互換
+  state.rivals ??= buildLegacyRivalsStub(state.world.schools);
 }
 
-// 週の裏成長は無し（進級時だけ+10で成長）
 export function rivalsWeeklyTraining(state) {
+  // 相手校の選手は「年度更新（進級）時に一律 +10」だけ成長する仕様。
+  // 毎週の成長処理は行わない（呼ばれても無影響）。
   ensureRivals(state);
 }
 
-function add10AllAbilities(a) {
-  a.abilities.sprint = clamp1to110((a.abilities.sprint ?? 0) + 10);
-  a.abilities.speed = clamp1to110((a.abilities.speed ?? 0) + 10);
-  a.abilities.stamina = clamp1to110((a.abilities.stamina ?? 0) + 10);
-  a.abilities.toughness = clamp1to110((a.abilities.toughness ?? 0) + 10);
-  a.abilities.technique = clamp1to110((a.abilities.technique ?? 0) + 10);
-}
-
-// 年度更新：3年引退→進級（能力+10）→新1年生生成
+// 年度更新：相手校
 export function rivalsYearUpdate(state) {
   ensureRivals(state);
 
-  for (const groupKey of Object.keys(state.rivals)) {
-    for (const school of state.rivals[groupKey]) {
-      const level = school.level ?? 1;
+  for (const s of state.world.schools) {
+    // 3年引退
+    const survivors = (s.athletes ?? []).filter(a => a.grade !== 3);
 
-      const current = (school.athletes ?? []).slice();
-
-      const g1 = current.filter(x => x.grade === 1);
-      const g2 = current.filter(x => x.grade === 2);
-      const g3 = current.filter(x => x.grade === 3);
-
-      // 3年は引退（捨てる）
-      void (g3);
-
-      // 2年→3年（+10）
-      const nextG3 = g2.slice(0, 5).map(a => {
-        const b = { ...a, grade: 3, abilities: { ...(a.abilities ?? {}) } };
-        add10AllAbilities(b);
-        return b;
-      });
-
-      // 1年→2年（+10）
-      const nextG2 = g1.slice(0, 5).map(a => {
-        const b = { ...a, grade: 2, abilities: { ...(a.abilities ?? {}) } };
-        add10AllAbilities(b);
-        return b;
-      });
-
-      // 新1年 5人（レンジ生成）
-      const nextG1 = Array.from({ length: 5 }, () => makeAthlete(level, 1));
-
-      // 1年→2年→3年の順で格納
-      school.athletes = nextG1.concat(nextG2, nextG3);
+    // 進級（能力+10）
+    for (const a of survivors) {
+      a.grade += 1;
+      a.abilities.sprint = clamp1to110(a.abilities.sprint + 10);
+      a.abilities.speed = clamp1to110(a.abilities.speed + 10);
+      a.abilities.stamina = clamp1to110(a.abilities.stamina + 10);
+      a.abilities.toughness = clamp1to110(a.abilities.toughness + 10);
+      a.abilities.technique = clamp1to110(a.abilities.technique + 10);
+      recalcOverall(a);
     }
+
+    // 新1年 5人
+    const freshmen = [];
+    for (let i = 0; i < 5; i++) freshmen.push(createRivalAthlete(1, i, s.level));
+
+    s.athletes = freshmen.concat(survivors);
   }
+
+  // 旧互換stubも更新しておく
+  state.rivals = buildLegacyRivalsStub(state.world.schools);
 }
