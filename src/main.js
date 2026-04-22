@@ -1811,7 +1811,7 @@ function renderHome(state) {
     ? meet.type === "record"
       ? "この週は【記録会】（練習後に出場選出→実行）"
       : meet.type === "soutai"
-        ? `この週は【${stageTitleSoutai(meet.stage)}】
+        ? `この週は【${stageTitleSoutai(meet.stage)}】（練習後に出場選出→実行）`
         : meet.type === "ekiden"
           ? `この週は【${stageTitleEkiden(meet.stage)}】（練習後に出場選出→実行）`
           : "この週は【新人駅伝】（練習後に出場選出→実行）"
