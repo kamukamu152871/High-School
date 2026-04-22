@@ -1105,7 +1105,7 @@ function renderEkidenNotQualified(state, stageKey) {
   app.innerHTML = `
     <div class="card">
       <h2>${stageTitleEkiden(stageKey)}</h2>
-      <p style="color:#b00;">出場条件を満たしていないため出場できません（前大会で5位以内が必要）。</p>
+      <p style="color:#b00;">出場条件を満たしていないため出場できません。</p>
       <div class="row" style="margin-top:14px;">
         <button id="ok">OK（次の週へ）</button>
       </div>
@@ -1988,6 +1988,7 @@ function renderHelp(state) {
         <li>総体（自校）：地区総体は自由に出場、県/地域/全国は前大会通過者のみ出場できます。</li>
         <li>総体（通過条件）：地区→県は各種目7位以内、県→地域は各種目7位以内、地域→全国は各種目5位以内です。</li>
         <li>兵庫県駅伝の参加校：阪神8、神戸9、東播7、西播6、丹有3、淡路2、但馬2（合計37校）です。</li>
+      　<li>近畿駅伝は兵庫駅伝で6位以内に入ると出場できます。</li>
         <li>全国駅伝の出場校：県駅伝は各都道府県1校（北海道のみ2校）+ 各地域駅伝の最上位1校です。</li>
         <li>新人駅伝の出場校：全国駅伝上位10校 + それに含まれない兵庫県駅伝上位10校（計20校）です。</li>
       </ul>
