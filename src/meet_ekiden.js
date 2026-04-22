@@ -10,15 +10,20 @@ function formatHMS(totalSec) {
 }
 
 // teamPicks: [{leg,event,athlete}] 7つ
-function runTeamTime(teamPicks) {
+function runTeamTime(state, teamPicks, isPlayerTeam) {
   const legs = teamPicks.map(x => {
     const power = calcEventPower(x.athlete, x.event);
-    const t = calcTimeSecondsFromPower(x.event, power);
+
+    // ★重要：自校だけ state を渡して乱数レンジ（キャプテン）を反映
+    const t = isPlayerTeam
+      ? calcTimeSecondsFromPower(x.event, power, state)
+      : calcTimeSecondsFromPower(x.event, power, null);
+
     return {
       leg: x.leg,
       event: x.event,
 
-      // ★追加：区間記録の重複排除に使う
+      // 区間記録の重複排除に使う
       athleteId: x.athlete?.id ?? null,
       grade: x.athlete?.grade ?? null,
 
@@ -45,7 +50,6 @@ function nextStageKey(stageKey) {
 
 // legごとに「区間順位」「累積順位」を計算して返す
 function buildSplits(rankedTeams) {
-  // rankedTeams: [{school,isPlayer,legs:[{leg,timeSec...}], ...}]
   const splits = [];
 
   for (let leg = 1; leg <= 7; leg++) {
@@ -66,19 +70,16 @@ function buildSplits(rankedTeams) {
       };
     });
 
-    // 区間順位（その区間タイム順）
     const legRanked = withCum
       .slice()
       .sort((a, b) => a.legTimeSec - b.legTimeSec)
       .map((x, i) => ({ ...x, legRank: i + 1 }));
 
-    // 累積順位（その時点の合計順）
     const cumRanked = withCum
       .slice()
       .sort((a, b) => a.cumSec - b.cumSec)
       .map((x, i) => ({ ...x, cumRank: i + 1 }));
 
-    // 同じ学校で合流
     const map = new Map();
     for (const x of legRanked) map.set(x.school, { ...x });
     for (const x of cumRanked) {
@@ -122,14 +123,14 @@ export function runEkiden(state, stageKey, playerPicks, options = {}) {
     return eligibleSet.has(s.name);
   });
 
-  const player = runTeamTime(playerPicks);
+  const player = runTeamTime(state, playerPicks, true);
 
   const others = rivals.map(s => {
     const athletes = excludeGrade3
       ? (s.athletes ?? []).filter(a => a.grade !== 3)
       : (s.athletes ?? []);
     const picks = recommendEkidenPicks(athletes);
-    const res = runTeamTime(picks);
+    const res = runTeamTime(state, picks, false);
     return { school: s.name, isPlayer: false, schoolObj: s, ...res };
   });
 
@@ -147,7 +148,7 @@ export function runEkiden(state, stageKey, playerPicks, options = {}) {
     when: `${state.month}月${state.week}週`,
     ranking: ranked,
 
-    // ��間ごとの順位（区間順位＆累積順位）
+    // 区間ごとの順位（区間順位＆累積順位）
     splits: buildSplits(ranked),
 
     // 次大会へ持ち越す上位5チーム（学校オブジェクトを保持）
@@ -187,5 +188,6 @@ function stageTitle(key) {
   if (key === "prefecture") return "県駅伝";
   if (key === "region") return "地域駅伝";
   if (key === "national") return "全国駅伝";
+  if (key === "newcomer") return "新人駅伝";
   return "駅伝";
 }
