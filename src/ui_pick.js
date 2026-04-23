@@ -19,6 +19,12 @@ export function renderPicker(app, mode, state, context) {
 function btn(html, id) { return `<button id="${id}">${html}</button>`; }
 function smallBtn(html, id) { return `<button id="${id}" style="background:#444;">${html}</button>`; }
 function athleteLabel(a) { return `${a.grade}年 ${a.name}（${a.personality} / 総合${a.overall}）`; }
+function athleteAbilitiesText(a) {
+  return `SPRINT ${Math.floor(a.abilities.sprint)} / SPEED ${Math.floor(a.abilities.speed)} / STAMINA ${Math.floor(a.abilities.stamina)} / TOUGHNESS ${Math.floor(a.abilities.toughness)} / TECHNIQUE ${Math.floor(a.abilities.technique)}`;
+}
+function athleteLabelWithAbilities(a) {
+  return `${athleteLabel(a)} / ${athleteAbilitiesText(a)}`;
+}
 
 // ===== キャプテン指名 =====
 // - 3年生から1人選ぶ
@@ -112,6 +118,7 @@ function renderRecordPicker(app, state, { onCancel, onConfirm }) {
       return `
         <div style="padding:8px;border-top:1px solid #eee;">
           <div style="font-weight:700;">${athleteLabel(a)}</div>
+          <div style="margin-top:4px;color:#555;">${athleteAbilitiesText(a)}</div>
           <div style="margin-top:6px;">${options}</div>
         </div>
       `;
@@ -262,6 +269,7 @@ function renderSoutaiPicker(app, state, {
       return `
         <div style="padding:8px;border-top:1px solid #eee;">
           <div style="font-weight:700;">${athleteLabel(a)} / 出場数 ${used}/2</div>
+          <div style="margin-top:4px;color:#555;">${athleteAbilitiesText(a)}</div>
           <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px;">
             ${readOnly ? `<span style="color:#777;">（確認のみ）</span>` : addButtons}
           </div>
@@ -400,7 +408,7 @@ function renderEkidenPicker(app, state, { onCancel, onConfirm, title = "出場�
       const cur = picks.get(s.leg) ?? "";
       const options = candidates.map(a => {
         const disabled = (used.has(a.id) && a.id !== cur) ? "disabled" : "";
-        return `<option value="${a.id}" ${a.id === cur ? "selected" : ""} ${disabled}>${athleteLabel(a)}</option>`;
+        return `<option value="${a.id}" ${a.id === cur ? "selected" : ""} ${disabled}>${athleteLabelWithAbilities(a)}</option>`;
       }).join("");
 
       return `
