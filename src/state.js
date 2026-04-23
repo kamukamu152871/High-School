@@ -270,15 +270,15 @@ export function clearSave() {
   localStorage.removeItem(SAVE_KEY);
 }
 
-// ★スカウト候補（1年生）を作る：能力が21〜60（現行仕様維持）
+// ★スカウト候補（1年生）を作る：能力が21〜50（現行仕様維持）
 export function createScoutFreshman(index) {
   const r = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
   const abilities = {
-    sprint: r(21, 60),
-    speed: r(21, 60),
-    stamina: r(21, 60),
-    toughness: r(21, 60),
-    technique: r(21, 60),
+    sprint: r(21, 50),
+    speed: r(21, 50),
+    stamina: r(21, 50),
+    toughness: r(21, 50),
+    technique: r(21, 50),
   };
   const a = {
     id: `scout-1-${index}-${crypto.randomUUID?.() ?? Math.random()}`,
