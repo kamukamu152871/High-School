@@ -8,13 +8,14 @@ import {
   ensureAchievements as ensureAchievementsState,
 } from "./state.js";
 
-import { TRAININGS, applyTraining } from "./rules.js";
+import { TRAININGS, applyTraining, getCaptain, recalcOverall, withRaceRandomMode } from "./rules.js";
 import { ensureRivals, rivalsWeeklyTraining, rivalsYearUpdate } from "./rivals.js";
 import { renderPicker } from "./ui_pick.js";
 
 import { runRecordMeet } from "./meet_record.js";
 import { runSoutai } from "./meet_soutai.js";
 import { runEkiden } from "./meet_ekiden.js";
+import { BLOCKS, blockName } from "./data/regions.js";
 
 const app = document.querySelector("#app");
 
@@ -105,6 +106,646 @@ function ensureAchievements(state) {
   state.newcomerEkiden.eligibleSchools ??= [];
   state.newcomerEkiden.top10 ??= [];
   state.newcomerEkiden.sourceWhen ??= null;
+}
+
+function ensureWorldSeasonResults(state) {
+  state.world ??= { schools: null, season: {}, history: [] };
+  state.world.season ??= {};
+  state.world.season.otherResults ??= {
+    soutai: { hyogoDistrict: {}, kinkiPrefecture: {}, regionBlocks: {} },
+    ekiden: {
+      hyogoDistrict: {},
+      kinkiPrefecture: {},
+      regionBlocks: {},
+      nationalSourceBySchool: {},
+      nationalWinnerBySchool: {},
+      nationalQualifiedBySchool: {},
+    },
+  };
+  state.world.season.otherResults.soutai ??= { hyogoDistrict: {}, kinkiPrefecture: {}, regionBlocks: {} };
+  state.world.season.otherResults.ekiden ??= {
+    hyogoDistrict: {},
+    kinkiPrefecture: {},
+    regionBlocks: {},
+    nationalSourceBySchool: {},
+    nationalWinnerBySchool: {},
+    nationalQualifiedBySchool: {},
+  };
+  state.world.season.otherResults.soutai.hyogoDistrict ??= {};
+  state.world.season.otherResults.soutai.kinkiPrefecture ??= {};
+  state.world.season.otherResults.soutai.regionBlocks ??= {};
+  state.world.season.otherResults.ekiden.hyogoDistrict ??= {};
+  state.world.season.otherResults.ekiden.kinkiPrefecture ??= {};
+  state.world.season.otherResults.ekiden.regionBlocks ??= {};
+  state.world.season.otherResults.ekiden.nationalSourceBySchool ??= {};
+  state.world.season.otherResults.ekiden.nationalWinnerBySchool ??= {};
+  state.world.season.otherResults.ekiden.nationalQualifiedBySchool ??= {};
+}
+
+function clearOtherResultsCache(state) {
+  ensureWorldSeasonResults(state);
+  const sourceKeep = { ...(state.world.season.otherResults?.ekiden?.nationalSourceBySchool ?? {}) };
+  const winnerKeep = { ...(state.world.season.otherResults?.ekiden?.nationalWinnerBySchool ?? {}) };
+  const qualifiedKeep = { ...(state.world.season.otherResults?.ekiden?.nationalQualifiedBySchool ?? {}) };
+  state.world.season.otherResults = {
+    soutai: { hyogoDistrict: {}, kinkiPrefecture: {}, regionBlocks: {} },
+    ekiden: {
+      hyogoDistrict: {},
+      kinkiPrefecture: {},
+      regionBlocks: {},
+      nationalSourceBySchool: sourceKeep,
+      nationalWinnerBySchool: winnerKeep,
+      nationalQualifiedBySchool: qualifiedKeep,
+    },
+  };
+}
+
+function safeSaveGame(state) {
+  try {
+    saveGame(state);
+    return true;
+  } catch (e) {
+    // localStorage容量超過時は重い「他大会結果キャッシュ」を削って再保存
+    clearOtherResultsCache(state);
+    try {
+      saveGame(state);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+function districtName(key) {
+  if (key === "kobe") return "神戸";
+  if (key === "hanshin") return "阪神";
+  if (key === "toban") return "東播";
+  if (key === "seiban") return "西播";
+  if (key === "tanyu") return "丹有";
+  if (key === "tajima") return "但馬";
+  if (key === "awaji") return "淡路";
+  return key;
+}
+
+function worldSchoolToLegacyRival(s) {
+  return {
+    name: s.name,
+    athletes: s.athletes,
+    facilityLevel: 1,
+    groupKey: s.prefecture ?? "other",
+  };
+}
+
+function worldSchoolsByFilter(state, predicate) {
+  return (state.world?.schools ?? []).filter(predicate);
+}
+
+function runSoutaiSimulation(state, stageKey, schools, title) {
+  ensureRivals(state);
+  const prevRivals = state.rivals?.[stageKey] ?? [];
+  const prevLast = state.lastMeetResult;
+
+  state.rivals[stageKey] = schools.map(worldSchoolToLegacyRival);
+  const res = runSoutai(state, stageKey, [], null);
+  res.title = title;
+
+  state.rivals[stageKey] = prevRivals;
+  state.lastMeetResult = prevLast;
+  return res;
+}
+
+function runEkidenSimulation(state, stageKey, schools, title) {
+  ensureRivals(state);
+  const prevRivals = state.rivals?.[stageKey] ?? [];
+  const prevLast = state.lastMeetResult;
+  const prevTeamName = state.teamName;
+  const simTeamName = "__other_result_sim__";
+
+  state.teamName = simTeamName;
+  state.rivals[stageKey] = schools.map(worldSchoolToLegacyRival);
+  const raw = runEkiden(state, stageKey, [], { title });
+
+  const ranking = (raw.ranking ?? [])
+    .filter(x => x.school !== simTeamName)
+    .map((x, i) => ({ ...x, rank: i + 1 }));
+
+  const splits = (raw.splits ?? []).map(sp => {
+    const rows = (sp.rows ?? [])
+      .filter(r => r.school !== simTeamName)
+      .map((r, i) => ({ ...r, cumRank: i + 1 }));
+    return { ...sp, rows };
+  });
+
+  const res = {
+    ...raw,
+    ranking,
+    splits,
+    myRank: null,
+    cleared: null,
+  };
+
+  state.teamName = prevTeamName;
+  state.rivals[stageKey] = prevRivals;
+  state.lastMeetResult = prevLast;
+  return res;
+}
+
+function prefectureOfSchool(state, schoolName) {
+  if (schoolName === state.teamName) return "兵庫";
+  const found = (state.world?.schools ?? []).find(s => s.name === schoolName);
+  return found?.prefecture ?? "";
+}
+
+function generateOtherSoutaiAfterDistrict(state) {
+  ensureWorldSeasonResults(state);
+  const out = {};
+  for (const d of ["hanshin", "toban", "seiban", "tanyu", "tajima", "awaji"]) {
+    const schools = worldSchoolsByFilter(state, s => s.prefecture === "兵庫" && s.districtKey === d);
+    out[d] = {
+      label: `${districtName(d)}地区`,
+      result: runSoutaiSimulation(state, "district", schools, `${districtName(d)}地区総体`),
+    };
+  }
+  state.world.season.otherResults.soutai.hyogoDistrict = out;
+}
+
+function generateKinkiPrefSoutaiAfterPrefecture(state, hyogoResult) {
+  ensureWorldSeasonResults(state);
+  const prefs = ["兵庫", "大阪", "京都", "和歌山", "滋賀", "奈良"];
+  const out = {};
+  for (const pref of prefs) {
+    if (pref === "兵庫") {
+      out[pref] = { label: pref, result: hyogoResult };
+      continue;
+    }
+    const schools = worldSchoolsByFilter(state, s => s.prefecture === pref);
+    out[pref] = {
+      label: pref,
+      result: runSoutaiSimulation(state, "prefecture", schools, `${pref}県総体`),
+    };
+  }
+  state.world.season.otherResults.soutai.kinkiPrefecture = out;
+}
+
+function generateRegionSoutaiAfterRegion(state, kinkiResult) {
+  ensureWorldSeasonResults(state);
+  const out = {};
+  for (const [key, block] of Object.entries(BLOCKS)) {
+    if (key === "kinki") {
+      out[key] = { label: block.name, result: kinkiResult };
+      continue;
+    }
+    const schools = worldSchoolsByFilter(state, s => block.prefectures.includes(s.prefecture));
+    out[key] = {
+      label: block.name,
+      result: runSoutaiSimulation(state, "region", schools, `${block.name}地域総体`),
+    };
+  }
+  state.world.season.otherResults.soutai.regionBlocks = out;
+}
+
+function generateOtherEkidenAfterDistrict(state, kobeResult = null) {
+  ensureWorldSeasonResults(state);
+  const out = {};
+  for (const d of ["hanshin", "toban", "seiban", "tanyu", "tajima", "awaji"]) {
+    const schools = worldSchoolsByFilter(state, s => s.prefecture === "兵庫" && s.districtKey === d);
+    out[d] = {
+      label: `${districtName(d)}地区`,
+      result: runEkidenSimulation(state, "district", schools, `${districtName(d)}地区駅伝`),
+    };
+  }
+  if (kobeResult) {
+    out.kobe = { label: "神戸地区", result: kobeResult };
+  } else {
+    const kobeSchools = worldSchoolsByFilter(state, s => s.prefecture === "兵庫" && s.districtKey === "kobe");
+    out.kobe = {
+      label: "神戸地区",
+      result: runEkidenSimulation(state, "district", kobeSchools, "神戸地区駅伝"),
+    };
+  }
+  state.world.season.otherResults.ekiden.hyogoDistrict = out;
+}
+
+// 兵庫県駅伝の出場条件：各地区で定められた順位以内の高校を選抜
+function buildHyogoPrefEkidenTeams(state, options = {}) {
+  const excludePlayer = options.excludePlayer ?? true;
+  ensureWorldSeasonResults(state);
+  const districtResults = state.world.season.otherResults?.ekiden?.hyogoDistrict ?? {};
+  
+  // 地区ごとのカットオフ：阪神8位、神戸9位、東播7位、西播6位、丹有3位、淡路2位、但馬2位
+  const cutoffByDistrict = {
+    hanshin: 8,
+    kobe: 9,
+    toban: 7,
+    seiban: 6,
+    tanyu: 3,
+    awaji: 2,
+    tajima: 2,
+  };
+  
+  const qualifiedSchoolNames = new Set();
+  for (const [districtKey, cutoff] of Object.entries(cutoffByDistrict)) {
+    const districtResult = districtResults[districtKey];
+    if (districtResult?.result?.ranking) {
+      const ranked = districtResult.result.ranking.slice(0, cutoff);
+      for (const r of ranked) {
+        if (!r?.school) continue;
+        if (excludePlayer && r.school === state.teamName) continue;
+        qualifiedSchoolNames.add(r.school);
+      }
+    }
+  }
+
+  const worldByName = new Map((state.world?.schools ?? []).map(s => [s.name, s]));
+  return Array.from(qualifiedSchoolNames.values())
+    .map(name => worldByName.get(name))
+    .filter(Boolean);
+}
+
+function buildNewcomerEligibleSchoolsFromNationalResult(state, nationalResult) {
+  const ranking = nationalResult?.ranking ?? [];
+
+  // 学校重複を除去した順位表を作る（同一校が二重にいるケースを防ぐ）
+  const uniqRank = [];
+  const seen = new Set();
+  for (const x of ranking) {
+    if (!x?.school || seen.has(x.school)) continue;
+    seen.add(x.school);
+    uniqRank.push(x);
+  }
+
+  // 全国枠: 上位10校
+  const nationalTop10 = uniqRank.slice(0, 10);
+  const nationalSchoolSet = new Set(nationalTop10.map(x => x.school));
+
+  // 兵庫枠: 兵庫県駅伝上位10校（全国枠重複は除外し繰り上げ）
+  ensureWorldSeasonResults(state);
+  let hyogoPrefRanking = state.world.season.otherResults?.ekiden?.kinkiPrefecture?.["兵庫"]?.result?.ranking ?? [];
+  if (hyogoPrefRanking.length === 0) {
+    hyogoPrefRanking = (state.world.season.lastHyogoEkidenTop10 ?? []).map(x => ({
+      school: x.school,
+      rank: x.rank,
+    }));
+  }
+  if (hyogoPrefRanking.length === 0) {
+    generateKinkiPrefEkidenAfterPrefecture(state);
+    hyogoPrefRanking = state.world.season.otherResults?.ekiden?.kinkiPrefecture?.["兵庫"]?.result?.ranking ?? [];
+  }
+  const hyogoRanked = [];
+  const hyogoSeen = new Set();
+  for (const x of hyogoPrefRanking) {
+    if (!x?.school || hyogoSeen.has(x.school)) continue;
+    hyogoSeen.add(x.school);
+    hyogoRanked.push(x);
+  }
+  const hyogoQuota = [];
+  for (const x of hyogoRanked) {
+    if (hyogoQuota.length >= 10) break;
+    if (nationalSchoolSet.has(x.school)) continue;
+    hyogoQuota.push(x);
+  }
+
+  const eligibleSchools = nationalTop10
+    .map(x => x.school)
+    .concat(hyogoQuota.map(x => x.school));
+
+  return {
+    nationalTop10: nationalTop10.map(x => ({
+      school: x.school,
+      isPlayer: !!x.isPlayer,
+      schoolObj: x.schoolObj ?? null,
+    })),
+    eligibleSchools,
+  };
+}
+
+function generateKinkiPrefEkidenAfterPrefecture(state, hyogoResult = null) {
+  ensureWorldSeasonResults(state);
+  const prefs = ["兵庫", "大阪", "京都", "和歌山", "滋賀", "奈良"];
+  const out = {};
+
+  for (const pref of prefs) {
+    if (pref === "兵庫") {
+      // 実大会の兵庫県駅伝結果がある場合はそれを使う
+      if (hyogoResult) {
+        out[pref] = { label: pref, result: hyogoResult };
+      } else {
+        let hyogoTeams = buildHyogoPrefEkidenTeams(state, { excludePlayer: true });
+        if (hyogoTeams.length === 0) {
+          hyogoTeams = worldSchoolsByFilter(state, s => s.prefecture === "兵庫");
+        }
+        const hyogoPrefResult = runEkidenSimulation(state, "prefecture", hyogoTeams, "兵庫県駅伝");
+        out[pref] = { label: pref, result: hyogoPrefResult };
+      }
+      continue;
+    }
+    const schools = worldSchoolsByFilter(state, s => s.prefecture === pref);
+    out[pref] = {
+      label: pref,
+      result: runEkidenSimulation(state, "prefecture", schools, `${pref}県駅伝`),
+    };
+  }
+  state.world.season.otherResults.ekiden.kinkiPrefecture = out;
+}
+
+function buildNationalEkidenSourceMaps(state, prefResults, regionResults) {
+  const winnerBySchool = {};
+  const selectedSchoolSet = new Set();
+
+  // 県駅伝優先: 各都道府県1校、北海道のみ2校
+  for (const [pref, res] of Object.entries(prefResults)) {
+    const ranked = res?.ranking ?? [];
+    const need = pref === "北海道" ? 2 : 1;
+
+    let added = 0;
+    for (const x of ranked) {
+      if (!x?.school || selectedSchoolSet.has(x.school)) continue;
+      winnerBySchool[x.school] = pref;
+      selectedSchoolSet.add(x.school);
+      added += 1;
+      if (added >= need) break;
+    }
+  }
+
+  // キャッシュ削除後でも、直近の兵庫県駅伝実結果があれば県代表を優先固定する
+  const lastHyogoWinner = state.world?.season?.lastHyogoEkidenWinnerSchool
+    ?? state.world?.season?.lastHyogoEkidenTop10?.[0]?.school
+    ?? null;
+  if (lastHyogoWinner) {
+    for (const [school, pref] of Object.entries(winnerBySchool)) {
+      if (pref === "兵庫") {
+        delete winnerBySchool[school];
+        selectedSchoolSet.delete(school);
+      }
+    }
+    winnerBySchool[lastHyogoWinner] = "兵庫";
+    selectedSchoolSet.add(lastHyogoWinner);
+  }
+
+  // 地域駅伝優先: 各地域で最上位（県駅伝枠と重複する学校は除外し繰り上げ）
+  const qualifiedBySchool = {};
+  for (const [key, info] of Object.entries(regionResults)) {
+    const ranked = info?.result?.ranking ?? [];
+    const q = ranked.find(x => x?.school && !selectedSchoolSet.has(x.school));
+    if (!q?.school) continue;
+    qualifiedBySchool[q.school] = blockName(key);
+    selectedSchoolSet.add(q.school);
+  }
+
+  const sourceBySchool = { ...winnerBySchool, ...qualifiedBySchool };
+  return { winnerBySchool, qualifiedBySchool, sourceBySchool };
+}
+
+function generateRegionEkidenAfterRegion(state, kinkiResult) {
+  ensureWorldSeasonResults(state);
+
+  const allPrefs = Array.from(new Set((state.world?.schools ?? []).map(s => s.prefecture))).sort((a, b) => a.localeCompare(b, "ja"));
+  const prefResults = {};
+  for (const pref of allPrefs) {
+    if (pref === "兵庫") {
+      prefResults[pref] = state.world.season.otherResults.ekiden.kinkiPrefecture?.["兵庫"]?.result ??
+        runEkidenSimulation(state, "prefecture", worldSchoolsByFilter(state, s => s.prefecture === "兵庫"), "兵庫県駅伝");
+      continue;
+    }
+    const schools = worldSchoolsByFilter(state, s => s.prefecture === pref);
+    prefResults[pref] = runEkidenSimulation(state, "prefecture", schools, `${pref}県駅伝`);
+  }
+
+  const out = {};
+  for (const [key, block] of Object.entries(BLOCKS)) {
+    if (key === "kinki") {
+      out[key] = { label: block.name, result: kinkiResult };
+      continue;
+    }
+
+    const schoolSet = new Set();
+    for (const pref of block.prefectures) {
+      const ranked = prefResults[pref]?.ranking ?? [];
+      for (const x of ranked.slice(0, 6)) schoolSet.add(x.school);
+    }
+    const schools = Array.from(schoolSet.values())
+      .map(name => (state.world?.schools ?? []).find(s => s.name === name))
+      .filter(Boolean);
+
+    out[key] = {
+      label: block.name,
+      result: runEkidenSimulation(state, "region", schools, `${block.name}地域駅伝`),
+    };
+  }
+
+  const maps = buildNationalEkidenSourceMaps(state, prefResults, out);
+
+  state.world.season.otherResults.ekiden.regionBlocks = out;
+  state.world.season.otherResults.ekiden.nationalSourceBySchool = maps.sourceBySchool;
+  state.world.season.otherResults.ekiden.nationalWinnerBySchool = maps.winnerBySchool;
+  state.world.season.otherResults.ekiden.nationalQualifiedBySchool = maps.qualifiedBySchool;
+}
+
+function getOtherResultsConfig(state) {
+  const m = state.month;
+  const w = state.week;
+
+  if (m === 5 && (w === 2 || w === 3)) {
+    return { kind: "soutai", bucket: "hyogoDistrict", title: "兵庫 各地区総体（神戸以外）" };
+  }
+  if (m === 6 && (w === 1 || w === 2)) {
+    return { kind: "soutai", bucket: "kinkiPrefecture", title: "近畿 各県総体" };
+  }
+  if ((m === 6 && w === 4) || (m === 7 && (w === 1 || w === 2 || w === 3))) {
+    return { kind: "soutai", bucket: "regionBlocks", title: "各地域総体" };
+  }
+
+  if (m === 10 && w === 3) {
+    return { kind: "ekiden", bucket: "hyogoDistrict", title: "兵庫 各地区駅伝" };
+  }
+  if (m === 11 && w === 1) {
+    return { kind: "ekiden", bucket: "kinkiPrefecture", title: "近畿 各県駅伝" };
+  }
+  if ((m === 11 && (w === 3 || w === 4)) || (m === 12 && (w === 1 || w === 2))) {
+    return { kind: "ekiden", bucket: "regionBlocks", title: "各地域駅伝" };
+  }
+
+  return null;
+}
+
+function renderOtherResults(state, selectedKey = null) {
+  ensureWorldSeasonResults(state);
+  const cfg = getOtherResultsConfig(state);
+
+  if (!cfg) {
+    app.innerHTML = `
+      <div class="card">
+        <h2>他大会結果</h2>
+        <p style="color:#555;">この期間に表示できる他大会結果はありません。</p>
+        <div class="row" style="margin-top:12px;">
+          <button class="secondary" id="back">戻る</button>
+        </div>
+      </div>
+    `;
+    document.querySelector("#back").onclick = () => renderHome(state);
+    return;
+  }
+
+  if (cfg.kind === "ekiden" && cfg.bucket === "kinkiPrefecture") {
+    const prefMap = state.world.season.otherResults?.ekiden?.kinkiPrefecture ?? {};
+    if (Object.keys(prefMap).length === 0) {
+      generateKinkiPrefEkidenAfterPrefecture(state);
+    }
+  }
+
+  const map = state.world.season.otherResults?.[cfg.kind]?.[cfg.bucket] ?? {};
+  const keys = Object.keys(map);
+
+  if (keys.length === 0) {
+    app.innerHTML = `
+      <div class="card">
+        <h2>${cfg.title}</h2>
+        <p style="color:#555;">まだ結果データがありません。</p>
+        <div class="row" style="margin-top:12px;">
+          <button class="secondary" id="back">戻る</button>
+        </div>
+      </div>
+    `;
+    document.querySelector("#back").onclick = () => renderHome(state);
+    return;
+  }
+
+  const key = (selectedKey && map[selectedKey]) ? selectedKey : keys[0];
+  const active = map[key];
+  const result = active.result;
+
+  const table = cfg.kind === "soutai"
+    ? (() => {
+      const rows = (result.overallRanking ?? []).slice(0, 10).map(x => {
+        const pref = prefectureOfSchool(state, x.school);
+        return `
+          <tr>
+            <td>${x.rank}</td>
+            <td>${x.school}</td>
+            <td>${pref}</td>
+            <td>${x.points}</td>
+          </tr>
+        `;
+      }).join("") || `<tr><td colspan="4" style="color:#777;">結果なし</td></tr>`;
+
+      return `
+        <div style="overflow:auto;">
+          <table style="width:100%; border-collapse:collapse; min-width:560px;">
+            <thead><tr><th>順位</th><th>学校</th><th>都道府県</th><th>得点</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
+    })()
+    : (() => {
+      const rows = (result.ranking ?? []).slice(0, 10).map(x => {
+        const pref = prefectureOfSchool(state, x.school);
+        return `
+          <tr>
+            <td>${x.rank}</td>
+            <td>${x.school}</td>
+            <td>${pref}</td>
+            <td>${x.totalText}</td>
+          </tr>
+        `;
+      }).join("") || `<tr><td colspan="4" style="color:#777;">結果なし</td></tr>`;
+
+      return `
+        <div style="overflow:auto;">
+          <table style="width:100%; border-collapse:collapse; min-width:560px;">
+            <thead><tr><th>順位</th><th>学校</th><th>都道府県</th><th>総合タイム</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
+    })();
+
+  const switchButtons = keys.map(k => {
+    const label = map[k]?.label ?? k;
+    const cls = k === key ? "" : "secondary";
+    return `<button class="${cls}" data-sw="${k}">${label}</button>`;
+  }).join("");
+
+  app.innerHTML = `
+    <div class="card">
+      <h2>${cfg.title}</h2>
+      <p style="color:#555;">表示中：${active.label}</p>
+      ${table}
+      <div class="row" style="margin-top:12px;">${switchButtons}</div>
+      <div class="row" style="margin-top:12px;">
+        <button id="detail">詳細リザルト</button>
+        <button class="secondary" id="back">戻る</button>
+      </div>
+    </div>
+  `;
+
+  app.querySelectorAll("button[data-sw]").forEach(b => {
+    b.onclick = () => renderOtherResults(state, b.getAttribute("data-sw"));
+  });
+  document.querySelector("#detail").onclick = () => {
+    if (cfg.kind === "soutai") {
+      renderSoutaiResult(state, result, {
+        save: false,
+        okLabel: "他大会結果へ戻る",
+        onOk: () => renderOtherResults(state, key),
+      });
+      return;
+    }
+
+    renderEkidenResult(state, result, {
+      okLabel: "他大会結果へ戻る",
+      onOk: () => renderOtherResults(state, key),
+    });
+  };
+  document.querySelector("#back").onclick = () => renderHome(state);
+}
+
+function ekidenSourceLabel(state, result, school) {
+  if (result.stage === "region") {
+    return prefectureOfSchool(state, school);
+  }
+  if (result.stage === "national") {
+    ensureWorldSeasonResults(state);
+    const winners = state.world.season.otherResults.ekiden.nationalWinnerBySchool ?? {};
+    const qualified = state.world.season.otherResults.ekiden.nationalQualifiedBySchool ?? {};
+    
+    if (winners[school]) {
+      return winners[school];
+    } else if (qualified[school]) {
+      return qualified[school];
+    } else {
+      return state.world.season.otherResults.ekiden.nationalSourceBySchool?.[school] ?? "-";
+    }
+  }
+  return "";
+}
+
+function ensureCaptain(state) {
+  // state.captainId: string | null
+  state.captainId ??= null;
+
+  // 既存セーブ救済：存在しないIDならnullに戻す
+  if (state.captainId) {
+    const found = (state.athletes ?? []).some(a => a.id === state.captainId);
+    if (!found) state.captainId = null;
+  }
+}
+
+function isDebugSchoolName(name) {
+  return (name ?? "").trim() === "デバッグ";
+}
+
+function applyDebugCheatIfNeeded(state, schoolName) {
+  if (!isDebugSchoolName(schoolName)) return;
+
+  for (const a of (state.athletes ?? [])) {
+    a.abilities.sprint = 110;
+    a.abilities.speed = 110;
+    a.abilities.stamina = 110;
+    a.abilities.toughness = 110;
+    a.abilities.technique = 110;
+    recalcOverall(a);
+  }
 }
 
 // 速いほど良い（timeSecが小さいほど上）
@@ -217,6 +858,10 @@ function updateAchievementsFromSoutai(state, stageKey, result) {
     const ranked = er.type === "withFinal" ? (er.final ?? []) : (er.overall ?? []);
     if (ranked[0]?.isPlayer) state.achievements.soutaiWins[stageKey][ev] += 1;
   }
+
+  if (result.overallWinner === state.teamName) {
+    state.achievements.soutaiOverallWins[stageKey] += 1;
+  }
 }
 
 function updateAchievementsFromEkiden(state, stageKey, result, category = "ekiden") {
@@ -237,13 +882,143 @@ function updateAchievementsFromEkiden(state, stageKey, result, category = "ekide
   }
 }
 
+function buildNationalSoutaiCarryFromOtherRegions(state) {
+  ensureWorldSeasonResults(state);
+
+  let blockMap = state.world.season.otherResults?.soutai?.regionBlocks ?? {};
+  if (Object.keys(blockMap).length === 0) {
+    const kinkiSchools = worldSchoolsByFilter(state, s => BLOCKS.kinki.prefectures.includes(s.prefecture));
+    const kinkiResult = runSoutaiSimulation(state, "region", kinkiSchools, "近畿地域総体");
+    generateRegionSoutaiAfterRegion(state, kinkiResult);
+    blockMap = state.world.season.otherResults?.soutai?.regionBlocks ?? {};
+  }
+  const out = [];
+
+  for (const info of Object.values(blockMap)) {
+    const res = info?.result;
+    if (!res?.events) continue;
+
+    for (const ev of ["800", "1500", "3000sc", "5000", "5000w"]) {
+      const er = res.events?.[ev];
+      if (!er) continue;
+
+      const ranked = er.type === "withFinal" ? (er.final ?? []) : (er.overall ?? []);
+      for (const x of ranked.slice(0, 5)) {
+        if (!x?.school || x.school === state.teamName) continue;
+        out.push({
+          fromStage: "region",
+          toStage: "national",
+          event: ev,
+          schoolName: x.school,
+          isPlayer: false,
+          athlete: x.athlete,
+          timeSec: x.timeSec,
+          timeText: x.timeText,
+          rank: x.rank ?? null,
+        });
+      }
+    }
+  }
+
+  return out;
+}
+
+function buildRegionSoutaiCarryFromKinkiPrefectures(state) {
+  ensureWorldSeasonResults(state);
+
+  let prefMap = state.world.season.otherResults?.soutai?.kinkiPrefecture ?? {};
+  if (Object.keys(prefMap).length === 0) {
+    const hyogoSchools = worldSchoolsByFilter(state, s => s.prefecture === "兵庫");
+    const hyogoResult = runSoutaiSimulation(state, "prefecture", hyogoSchools, "兵庫県総体");
+    generateKinkiPrefSoutaiAfterPrefecture(state, hyogoResult);
+    prefMap = state.world.season.otherResults?.soutai?.kinkiPrefecture ?? {};
+  }
+  const out = [];
+
+  for (const [pref, info] of Object.entries(prefMap)) {
+    const res = info?.result;
+    if (!res?.events) continue;
+
+    for (const ev of ["800", "1500", "3000sc", "5000", "5000w"]) {
+      const er = res.events?.[ev];
+      if (!er) continue;
+
+      const ranked = er.type === "withFinal" ? (er.final ?? []) : (er.overall ?? []);
+      for (const x of ranked.slice(0, 7)) {
+        if (!x?.school || x.school === state.teamName) continue;
+        out.push({
+          fromStage: "prefecture",
+          toStage: "region",
+          event: ev,
+          schoolName: x.school,
+          isPlayer: false,
+          athlete: x.athlete,
+          timeSec: x.timeSec,
+          timeText: x.timeText,
+          rank: x.rank ?? null,
+          prefecture: pref,
+        });
+      }
+    }
+  }
+
+  return out;
+}
+
+function buildNationalEkidenQualifiedTeamsFromWorld(state) {
+  ensureWorldSeasonResults(state);
+
+  const winners = state.world.season.otherResults?.ekiden?.nationalWinnerBySchool ?? {};
+  const qualified = state.world.season.otherResults?.ekiden?.nationalQualifiedBySchool ?? {};
+  const schoolNames = Array.from(new Set(
+    Object.keys(winners).concat(Object.keys(qualified))
+  )).filter(name => name !== state.teamName);
+  const worldByName = new Map((state.world?.schools ?? []).map(s => [s.name, s]));
+
+  return schoolNames
+    .map(name => worldByName.get(name))
+    .filter(Boolean)
+    .map(worldSchoolToLegacyRival);
+}
+
+function buildRegionEkidenQualifiedTeamsFromKinkiPrefectures(state) {
+  ensureWorldSeasonResults(state);
+
+  let prefMap = state.world.season.otherResults?.ekiden?.kinkiPrefecture ?? {};
+  if (Object.keys(prefMap).length === 0) {
+    generateKinkiPrefEkidenAfterPrefecture(state);
+    prefMap = state.world.season.otherResults?.ekiden?.kinkiPrefecture ?? {};
+  }
+  const schoolSet = new Set();
+
+  for (const info of Object.values(prefMap)) {
+    const ranked = info?.result?.ranking ?? [];
+    for (const x of ranked.slice(0, 6)) {
+      if (!x?.school || x.school === state.teamName) continue;
+      schoolSet.add(x.school);
+    }
+  }
+
+  const worldByName = new Map((state.world?.schools ?? []).map(s => [s.name, s]));
+  return Array.from(schoolSet.values())
+    .map(name => worldByName.get(name))
+    .filter(Boolean)
+    .map(worldSchoolToLegacyRival);
+}
+
 // ---- carry を次大会の rivals に混ぜ込む ----
 function buildSoutaiRivalsWithCarry(state, stageKey) {
   ensureRivals(state);
   ensureCarry(state);
 
   const base = (state.rivals?.[stageKey] ?? []).slice();
-  const carry = (state.carry.soutai.next ?? []).filter(x => x.toStage === stageKey);
+  let carry = (state.carry.soutai.next ?? []).filter(x => x.toStage === stageKey);
+  if (stageKey === "region") {
+    carry = carry.concat(buildRegionSoutaiCarryFromKinkiPrefectures(state));
+  }
+  if (stageKey === "national") {
+    carry = carry.concat(buildNationalSoutaiCarryFromOtherRegions(state));
+  }
   if (carry.length === 0) return base;
 
   const baseNames = new Set(base.map(s => s.name));
@@ -280,12 +1055,41 @@ function buildEkidenRivalsWithCarry(state, stageKey) {
   ensureRivals(state);
   ensureCarry(state);
 
+  // 県駅伝は「各地区の規定順位以内」だけを参加校にする（プレイヤー校は runEkiden 側で別枠参加）
+  if (stageKey === "prefecture") {
+    const hyogoTeams = buildHyogoPrefEkidenTeams(state, { excludePlayer: true });
+    if (hyogoTeams.length > 0) {
+      return hyogoTeams.map(worldSchoolToLegacyRival);
+    }
+  }
+
   const base = (state.rivals?.[stageKey] ?? []).slice();
-  const carryTeams = (state.carry.ekiden.next ?? [])
-    .filter(x => x.toStage === stageKey)
-    .map(x => x.team)
-    .filter(Boolean)
-    .filter(t => t.name !== state.teamName);
+  let carryTeams = [];
+
+  if (stageKey !== "national") {
+    carryTeams = (state.carry.ekiden.next ?? [])
+      .filter(x => x.toStage === stageKey)
+      .map(x => x.team)
+      .filter(Boolean)
+      .filter(t => t.name !== state.teamName);
+  }
+
+  if (stageKey === "national") {
+    carryTeams = buildNationalEkidenQualifiedTeamsFromWorld(state);
+  }
+  if (stageKey === "region") {
+    carryTeams = carryTeams.concat(buildRegionEkidenQualifiedTeamsFromKinkiPrefectures(state));
+  }
+
+  // 同名校の重複エントリーを除去（全国駅伝/新人駅伝での同一校二重出場を防ぐ）
+  const uniqCarry = [];
+  const seenCarryNames = new Set();
+  for (const t of carryTeams) {
+    if (!t?.name || seenCarryNames.has(t.name)) continue;
+    seenCarryNames.add(t.name);
+    uniqCarry.push(t);
+  }
+  carryTeams = uniqCarry;
 
   if (carryTeams.length === 0) return base;
 
@@ -319,7 +1123,7 @@ function renderEkidenNotQualified(state, stageKey) {
   app.innerHTML = `
     <div class="card">
       <h2>${stageTitleEkiden(stageKey)}</h2>
-      <p style="color:#b00;">出場条件を満たしていないため出場できません（前大会で5位以内が必要）。</p>
+      <p style="color:#b00;">出場条件を満たしていないため出場できません。</p>
       <div class="row" style="margin-top:14px;">
         <button id="ok">OK（次の週へ）</button>
       </div>
@@ -332,7 +1136,7 @@ function renderNewcomerEkidenNotQualified(state) {
   app.innerHTML = `
     <div class="card">
       <h2>新人駅伝</h2>
-      <p style="color:#b00;">出場条件を満たしていないため出場できません（直近の全国駅伝で10位以内が必要）。</p>
+      <p style="color:#b00;">出場条件を満たしていないため出場できません（全国駅伝上位10校 + それに含まれない兵庫県駅伝上位10校）。</p>
       <div class="row" style="margin-top:14px;">
         <button id="ok">OK（次の週へ）</button>
       </div>
@@ -357,10 +1161,10 @@ function renderSoutaiNoEntries(state, stageKey) {
 function computeScoutMaxByEkiden(state) {
   ensureScout(state);
   const tier = state.scout.lastEkidenTier ?? "none";
-  if (tier === "national_win") return 5;
-  if (tier === "national") return 4;
-  if (tier === "region") return 3;
-  if (tier === "prefecture") return 2;
+  if (tier === "national_top5") return 5;
+  if (tier === "region_top5") return 4;
+  if (tier === "region_entry") return 3;
+  if (tier === "prefecture_entry") return 2;
   return 1;
 }
 
@@ -488,6 +1292,10 @@ function renderAchievements(state) {
     </tr>
   `).join("");
 
+  const soutaiOverallRows = stages.map(st => `
+    <tr><td>${stageLabel(st)}</td><td>${count(state.achievements.soutaiOverallWins[st])}</td></tr>
+  `).join("");
+
   const ekidenWinRows = stages.map(st => `
     <tr><td>${stageLabel(st)}</td><td>${count(state.achievements.ekidenWins[st])}</td></tr>
   `).join("");
@@ -503,9 +1311,15 @@ function renderAchievements(state) {
     .map(leg => `<td>${count(state.achievements.newcomerEkidenLegAwards[String(leg)])}</td>`)
     .join("");
 
+  const cap = getCaptain(state);
+  const capText = cap ? `${cap.grade}年 ${cap.name}（${cap.personality}）` : "未指名";
+
   app.innerHTML = `
     <div class="card">
       <h2>実績</h2>
+
+      <h3 style="margin-top:14px;">キャプテン</h3>
+      <p style="color:#555;">現在：<b>${capText}</b></p>
 
       <h3 style="margin-top:14px;">総体 優勝回数（1位）</h3>
       <div style="overflow:auto;">
@@ -514,6 +1328,14 @@ function renderAchievements(state) {
             <tr><th>大会</th><th>800</th><th>1500</th><th>3000SC</th><th>5000</th><th>5000W</th></tr>
           </thead>
           <tbody>${soutaiRows}</tbody>
+        </table>
+      </div>
+
+      <h3 style="margin-top:14px;">総体 総合優勝回数</h3>
+      <div style="overflow:auto;">
+        <table style="width:100%; border-collapse:collapse; min-width:360px;">
+          <thead><tr><th>大会</th><th>回数</th></tr></thead>
+          <tbody>${soutaiOverallRows}</tbody>
         </table>
       </div>
 
@@ -683,6 +1505,10 @@ function renderScout(state) {
   };
 }
 
+// ★★★ バグ修正箇所 ★★★
+// 旧実装: saveGame(state) を直接呼んでいたため、localStorage容量超過時に
+// 例外が投げられ renderHome が実行されず画面が進まなくなっていた。
+// 修正: safeSaveGame に変更し、容量超過時もキャッシュを削除して再試行する。
 function goNextWeek(state) {
   if (isYearUpdateWeek(state)) {
     renderFacilityUpgradeChoice(state);
@@ -691,8 +1517,249 @@ function goNextWeek(state) {
 
   advanceWeek(state);
   state.lastTraining = null;
-  saveGame(state);
+  safeSaveGame(state); // ★ saveGame → safeSaveGame に変更
   renderHome(state);
+}
+
+// --- キャプテン指名（4月1週の練習後） ---
+function shouldPickCaptainNow(state) {
+  // 4月1週の「練習後」に割り込ませるので、ここでは週の情報だけで判定
+  if (!(state.month === 4 && state.week === 1)) return false;
+
+  // 未指名なら必ず
+  if (!state.captainId) return true;
+
+  // 指名済みでも、3年生以外になっていたら（年度更新後など）取り直し
+  const cap = getCaptain(state);
+  if (!cap) return true;
+  if (cap.grade !== 3) return true;
+
+  return false;
+}
+
+function renderCaptainPick(state, onDone) {
+  renderPicker(app, "captain", state, {
+    onCancel: () => renderHome(state),
+    onConfirm: (captainId) => {
+      state.captainId = captainId;
+      saveGame(state);
+      onDone?.();
+    }
+  });
+}
+
+function raceRandomModeForMeet(state, meetType) {
+  const cap = getCaptain(state);
+  const p = cap?.personality ?? "";
+
+  if (meetType === "soutai") {
+    return (p === "ふつう") ? "captain_normal" : "normal";
+  }
+
+  if (meetType === "ekiden" || meetType === "newcomer_ekiden") {
+    return (p === "てんさい") ? "captain_genius" : "normal";
+  }
+
+  return "normal";
+}
+
+function openMeetFlow(state, meet) {
+  if (!meet) {
+    goNextWeek(state);
+    return;
+  }
+
+  if (meet.type === "record") {
+    renderPicker(app, "record", state, {
+      onCancel: () => renderHome(state),
+      onConfirm: (picks) => {
+        const result = runRecordMeet(state, picks);
+        updateRecordsFromRecordMeet(state, result);
+        saveGame(state);
+        renderRecordResult(state, result);
+      }
+    });
+    return;
+  }
+
+  if (meet.type === "soutai") {
+    const original = state.rivals?.[meet.stage];
+    state.rivals[meet.stage] = buildSoutaiRivalsWithCarry(state, meet.stage);
+
+    const readOnly = meet.stage !== "district";
+    const fixedPicks = readOnly ? buildPlayerFixedSoutaiPicksFromCarry(state, meet.stage) : null;
+
+    // ★★★ バグ修正箇所 ★★★
+    // 旧実装: carry のクリアなしで renderSoutaiNoEntries に飛んでいた。
+    // 修正: 出場不可時に carry.soutai.next をクリアし、safeSaveGame で確実に保存する。
+    if (readOnly && (!fixedPicks || fixedPicks.length === 0)) {
+      state.rivals[meet.stage] = original;
+      state.carry.soutai.next = []; // ★ 残存carryをクリア（次シーズンへの持ち越し防止）
+      safeSaveGame(state);           // ★ 保存（容量超過対策）
+      renderSoutaiNoEntries(state, meet.stage);
+      return;
+    }
+
+    renderPicker(app, "soutai", state, {
+      allowedEvents: null,
+      allowedPairs: null,
+      readOnly,
+      fixedPicks,
+      onCancel: () => {
+        state.rivals[meet.stage] = original;
+        renderHome(state);
+      },
+      onConfirm: (picks) => {
+        const submit = readOnly ? (fixedPicks ?? []) : picks;
+
+        const mode = raceRandomModeForMeet(state, "soutai");
+        const result = withRaceRandomMode(state, mode, () =>
+          runSoutai(state, meet.stage, submit, null)
+        );
+
+        state.carry.soutai.next = result.carryCandidates ?? [];
+
+        updateRecordsFromSoutai(state, result);
+        updateAchievementsFromSoutai(state, meet.stage, result);
+
+        if (meet.stage === "district") generateOtherSoutaiAfterDistrict(state);
+        if (meet.stage === "prefecture") generateKinkiPrefSoutaiAfterPrefecture(state, result);
+        if (meet.stage === "region") generateRegionSoutaiAfterRegion(state, result);
+
+        state.rivals[meet.stage] = original;
+
+        safeSaveGame(state);
+        renderSoutaiResult(state, result);
+      }
+    });
+    return;
+  }
+
+  if (meet.type === "ekiden") {
+    if (!canEnterEkiden(state, meet.stage)) {
+      renderEkidenNotQualified(state, meet.stage);
+      return;
+    }
+
+    const original = state.rivals?.[meet.stage];
+    state.rivals[meet.stage] = buildEkidenRivalsWithCarry(state, meet.stage);
+
+    renderPicker(app, "ekiden", state, {
+      onCancel: () => {
+        state.rivals[meet.stage] = original;
+        renderHome(state);
+      },
+      onConfirm: (picks) => {
+        const mode = raceRandomModeForMeet(state, "ekiden");
+        const result = withRaceRandomMode(state, mode, () =>
+          runEkiden(state, meet.stage, picks)
+        );
+
+        if (meet.stage === "prefecture") {
+          ensureWorldSeasonResults(state);
+          const top10 = (result.ranking ?? []).slice(0, 10).map(x => ({ school: x.school, rank: x.rank }));
+          state.world.season.lastHyogoEkidenTop10 = top10;
+          state.world.season.lastHyogoEkidenWinnerSchool = top10[0]?.school ?? null;
+        }
+
+        ensureQualify(state);
+        if (meet.stage === "district") state.qualify.ekiden.prefecture = (result.myRank <= 9);
+        if (meet.stage === "prefecture") state.qualify.ekiden.region = (result.myRank <= 6);
+        if (meet.stage === "region") state.qualify.ekiden.national = (result.myRank <= 5);
+
+        ensureScout(state);
+        if (meet.stage === "prefecture") state.scout.lastEkidenTier = "prefecture_entry";
+        if (meet.stage === "region") state.scout.lastEkidenTier = result.myRank <= 5 ? "region_top5" : "region_entry";
+        if (meet.stage === "national") {
+          state.scout.lastEkidenTier = result.myRank <= 5 ? "national_top5" : "region_top5";
+          ensureAchievements(state);
+          const newcomerInfo = buildNewcomerEligibleSchoolsFromNationalResult(state, result);
+          state.newcomerEkiden.top10 = newcomerInfo.nationalTop10;
+          state.newcomerEkiden.eligibleSchools = newcomerInfo.eligibleSchools;
+          state.newcomerEkiden.sourceWhen = result.when ?? null;
+        }
+
+        state.carry.ekiden.next = result.top5Teams ?? [];
+
+        updateRecordsFromEkiden(state, result);
+        updateAchievementsFromEkiden(state, meet.stage, result, "ekiden");
+
+        if (meet.stage === "district") generateOtherEkidenAfterDistrict(state, result);
+        if (meet.stage === "prefecture") generateKinkiPrefEkidenAfterPrefecture(state, result);
+        if (meet.stage === "region") generateRegionEkidenAfterRegion(state, result);
+
+        state.rivals[meet.stage] = original;
+
+        const ok = safeSaveGame(state);
+        if (!ok) {
+          app.innerHTML = `
+            <div class="card">
+              <h2>保存エラー</h2>
+              <p style="color:#b00;">データ保存に失敗しました。ブラウザのストレージ容量が不足している可能性があります。</p>
+              <div class="row" style="margin-top:12px;">
+                <button id="retry">大会選出に戻る</button>
+                <button class="secondary" id="home">ホームへ</button>
+              </div>
+            </div>
+          `;
+          document.querySelector("#retry").onclick = () => openMeetFlow(state, meet);
+          document.querySelector("#home").onclick = () => renderHome(state);
+          return;
+        }
+        renderEkidenResult(state, result);
+      }
+    });
+    return;
+  }
+
+  if (meet.type === "newcomer_ekiden") {
+    if (!canEnterNewcomerEkiden(state)) {
+      renderNewcomerEkidenNotQualified(state);
+      return;
+    }
+
+    ensureAchievements(state);
+    const eligibleSchools = Array.from(new Set(state.newcomerEkiden.eligibleSchools ?? []));
+    const top10 = state.newcomerEkiden.top10 ?? [];
+    const newcomerRivalNames = eligibleSchools.filter(name => name !== state.teamName);
+
+    const original = state.rivals?.newcomer;
+    state.rivals.newcomer = newcomerRivalNames
+      .map(name => {
+        const fromTop10 = top10.find(x => x.school === name)?.schoolObj;
+        if (fromTop10) return fromTop10;
+        const fromNationalRivals = (state.rivals?.national ?? []).find(s => s.name === name);
+        if (fromNationalRivals) return fromNationalRivals;
+        const fromWorld = (state.world?.schools ?? []).find(s => s.name === name);
+        if (fromWorld) return worldSchoolToLegacyRival(fromWorld);
+        return null;
+      })
+      .filter(Boolean);
+
+    renderPicker(app, "newcomer_ekiden", state, {
+      onCancel: () => {
+        state.rivals.newcomer = original;
+        renderHome(state);
+      },
+      onConfirm: (picks) => {
+        const mode = raceRandomModeForMeet(state, "newcomer_ekiden");
+        const result = withRaceRandomMode(state, mode, () =>
+          runEkiden(state, "newcomer", picks, {
+            type: "newcomer_ekiden",
+            title: "新人駅伝",
+            excludeGrade3: true,
+            eligibleSchools,
+          })
+        );
+
+        updateAchievementsFromEkiden(state, "newcomer", result, "newcomer_ekiden");
+
+        state.rivals.newcomer = original;
+        safeSaveGame(state);
+        renderEkidenResult(state, result);
+      }
+    });
+  }
 }
 
 // --- 画面 ---
@@ -724,6 +1791,7 @@ function renderTitle() {
 
     const name = (document.querySelector("#teamNameInput")?.value ?? "").trim();
     state.teamName = name || "自校";
+    applyDebugCheatIfNeeded(state, state.teamName);
 
     ensureRivals(state);
     ensureQualify(state);
@@ -732,6 +1800,8 @@ function renderTitle() {
     ensureScout(state);
     ensureRecords(state);
     ensureAchievements(state);
+    ensureCaptain(state);
+
     saveGame(state);
     renderHome(state);
   };
@@ -746,6 +1816,8 @@ function renderTitle() {
       ensureScout(state);
       ensureRecords(state);
       ensureAchievements(state);
+      ensureCaptain(state);
+
       saveGame(state);
       renderHome(state);
     }
@@ -758,7 +1830,9 @@ function renderTitle() {
 }
 
 function renderHome(state) {
+  ensureWorldSeasonResults(state);
   const meet = getMeetOfWeek(state);
+  const pendingMeet = !!meet && !!state.lastTraining;
 
   const meetText = meet
     ? meet.type === "record"
@@ -774,7 +1848,12 @@ function renderHome(state) {
     ? "この週の最後に【年度更新（設備強化→スカウト→引退/進級/新入生）】があります"
     : "";
 
-  const trainingButtons = TRAININGS.map(t => `<button data-tr="${t.id}">${t.name}</button>`).join("");
+  const cap = getCaptain(state);
+  const capText = cap ? `${cap.grade}年 ${cap.name}（${cap.personality}）` : "未指名";
+
+  const trainingButtons = TRAININGS
+    .map(t => `<button data-tr="${t.id}" ${pendingMeet ? "disabled" : ""}>${t.name}</button>`)
+    .join("");
 
   app.innerHTML = `
     <div class="card">
@@ -783,16 +1862,20 @@ function renderHome(state) {
       <p>年：${state.year} / ${state.month}月 ${state.week}週</p>
       <p style="color:#555;">${meetText}</p>
       ${yearText ? `<p style="color:#b00;">${yearText}</p>` : ""}
+      <p style="color:#555;">キャプテン：${capText}</p>
       <p style="color:#555;">今週の練習：${state.lastTraining?.name ?? "未実施"}</p>
+      ${pendingMeet ? `<p style="color:#b00;">大会待機中：下の「大会へ」で選出/確定してください。</p>` : ""}
 
       <h3 style="margin-top:14px;">練習（タップで実行→大会があれば選出→実行）</h3>
       <div class="row">${trainingButtons}</div>
+      ${pendingMeet ? `<div class="row" style="margin-top:10px;"><button id="openMeet">大会へ</button></div>` : ""}
 
       <div class="row" style="margin-top:12px;">
         <button id="athletes">選手</button>
         <button id="facilities">設備</button>
         <button id="records">記録</button>
         <button id="achievements">実績</button>
+        <button id="otherResults">他大会結果</button>
         <button id="rename">学校名変更</button>
         <button id="help">ヘルプ</button>
         <button class="secondary" id="back">タイトルへ</button>
@@ -804,9 +1887,23 @@ function renderHome(state) {
   document.querySelector("#facilities").onclick = () => renderFacilities(state);
   document.querySelector("#records").onclick = () => renderRecords(state);
   document.querySelector("#achievements").onclick = () => renderAchievements(state);
+  document.querySelector("#otherResults").onclick = () => renderOtherResults(state);
   document.querySelector("#rename").onclick = () => renderRenameTeam(state);
   document.querySelector("#help").onclick = () => renderHelp(state);
   document.querySelector("#back").onclick = () => renderTitle();
+  if (pendingMeet) {
+    document.querySelector("#openMeet").onclick = () => {
+      ensureRivals(state);
+      ensureQualify(state);
+      ensureFacilities(state);
+      ensureCarry(state);
+      ensureScout(state);
+      ensureRecords(state);
+      ensureAchievements(state);
+      ensureCaptain(state);
+      openMeetFlow(state, meet);
+    };
+  }
 
   app.querySelectorAll("button[data-tr]").forEach(b => {
     b.onclick = async () => {
@@ -819,167 +1916,22 @@ function renderHome(state) {
       ensureScout(state);
       ensureRecords(state);
       ensureAchievements(state);
+      ensureCaptain(state);
 
       rivalsWeeklyTraining(state);
       applyTraining(state, id);
 
+      // ★4月1週 練習後：キャプテン指名
+      if (shouldPickCaptainNow(state)) {
+        saveGame(state);
+        renderCaptainPick(state, () => renderHome(state));
+        return;
+      }
+
       const meet = getMeetOfWeek(state);
       saveGame(state);
 
-      if (!meet) {
-        goNextWeek(state);
-        return;
-      }
-
-      if (meet.type === "record") {
-        renderPicker(app, "record", state, {
-          onCancel: () => renderHome(state),
-          onConfirm: (picks) => {
-            const result = runRecordMeet(state, picks);
-            updateRecordsFromRecordMeet(state, result);
-            saveGame(state);
-            renderRecordResult(state, result);
-          }
-        });
-        return;
-      }
-
-      if (meet.type === "soutai") {
-        const original = state.rivals?.[meet.stage];
-        state.rivals[meet.stage] = buildSoutaiRivalsWithCarry(state, meet.stage);
-
-        const readOnly = meet.stage !== "district";
-        const fixedPicks = readOnly ? buildPlayerFixedSoutaiPicksFromCarry(state, meet.stage) : null;
-
-        if (readOnly && (!fixedPicks || fixedPicks.length === 0)) {
-          state.rivals[meet.stage] = original;
-          renderSoutaiNoEntries(state, meet.stage);
-          return;
-        }
-
-        renderPicker(app, "soutai", state, {
-          allowedEvents: null,
-          allowedPairs: null,
-          readOnly,
-          fixedPicks,
-          onCancel: () => {
-            state.rivals[meet.stage] = original;
-            renderHome(state);
-          },
-          onConfirm: (picks) => {
-            const submit = readOnly ? (fixedPicks ?? []) : picks;
-            const result = runSoutai(state, meet.stage, submit, null);
-
-            state.carry.soutai.next = result.carryCandidates ?? [];
-
-            // ★歴代保存（5種目）
-            updateRecordsFromSoutai(state, result);
-            updateAchievementsFromSoutai(state, meet.stage, result);
-
-            state.rivals[meet.stage] = original;
-
-            saveGame(state);
-            renderSoutaiResult(state, result);
-          }
-        });
-        return;
-      }
-
-      if (meet.type === "ekiden") {
-        if (!canEnterEkiden(state, meet.stage)) {
-          renderEkidenNotQualified(state, meet.stage);
-          return;
-        }
-
-        const original = state.rivals?.[meet.stage];
-        state.rivals[meet.stage] = buildEkidenRivalsWithCarry(state, meet.stage);
-
-        renderPicker(app, "ekiden", state, {
-          onCancel: () => {
-            state.rivals[meet.stage] = original;
-            renderHome(state);
-          },
-          onConfirm: (picks) => {
-            const result = runEkiden(state, meet.stage, picks);
-
-            ensureQualify(state);
-            if (meet.stage === "district") state.qualify.ekiden.prefecture = !!result.cleared;
-            if (meet.stage === "prefecture") state.qualify.ekiden.region = !!result.cleared;
-            if (meet.stage === "region") state.qualify.ekiden.national = !!result.cleared;
-
-            ensureScout(state);
-            if (meet.stage === "prefecture") state.scout.lastEkidenTier = "prefecture";
-            if (meet.stage === "region") state.scout.lastEkidenTier = "region";
-            if (meet.stage === "national") {
-              state.scout.lastEkidenTier = (result.myRank === 1) ? "national_win" : "national";
-              ensureAchievements(state);
-              const top10 = (result.ranking ?? []).slice(0, 10).map(x => ({
-                school: x.school,
-                isPlayer: !!x.isPlayer,
-                schoolObj: x.schoolObj ?? null,
-              }));
-              state.newcomerEkiden.top10 = top10;
-              state.newcomerEkiden.eligibleSchools = top10.map(x => x.school);
-              state.newcomerEkiden.sourceWhen = result.when ?? null;
-            }
-
-            state.carry.ekiden.next = result.top5Teams ?? [];
-
-            // ★歴代保存（区間＋総合）
-            updateRecordsFromEkiden(state, result);
-            updateAchievementsFromEkiden(state, meet.stage, result, "ekiden");
-
-            state.rivals[meet.stage] = original;
-
-            saveGame(state);
-            renderEkidenResult(state, result);
-          }
-        });
-        return;
-      }
-
-      if (meet.type === "newcomer_ekiden") {
-        if (!canEnterNewcomerEkiden(state)) {
-          renderNewcomerEkidenNotQualified(state);
-          return;
-        }
-
-        ensureAchievements(state);
-        const eligibleSchools = state.newcomerEkiden.eligibleSchools ?? [];
-        const top10 = state.newcomerEkiden.top10 ?? [];
-        const top10RivalNames = top10.filter(x => !x.isPlayer).map(x => x.school);
-
-        const original = state.rivals?.newcomer;
-        state.rivals.newcomer = top10RivalNames
-          .map(name => {
-            const fromTop10 = top10.find(x => x.school === name)?.schoolObj;
-            if (fromTop10) return fromTop10;
-            return (state.rivals?.national ?? []).find(s => s.name === name) ?? null;
-          })
-          .filter(Boolean);
-
-        renderPicker(app, "newcomer_ekiden", state, {
-          onCancel: () => {
-            state.rivals.newcomer = original;
-            renderHome(state);
-          },
-          onConfirm: (picks) => {
-            const result = runEkiden(state, "newcomer", picks, {
-              type: "newcomer_ekiden",
-              title: "新人駅伝",
-              excludeGrade3: true,
-              eligibleSchools,
-            });
-
-            updateAchievementsFromEkiden(state, "newcomer", result, "newcomer_ekiden");
-
-            state.rivals.newcomer = original;
-            saveGame(state);
-            renderEkidenResult(state, result);
-          }
-        });
-        return;
-      }
+      openMeetFlow(state, meet);
     };
   });
 }
@@ -1039,11 +1991,11 @@ function renderHelp(state) {
 
       <h3 style="margin-top:12px;">練習と伸びる能力</h3>
       <ul>
-        <li>流し：主に <b>SPRINT</b> が伸びやすい練習です。</li>
-        <li>TT：主に <b>SPEED</b> が伸びやすい練習です。</li>
-        <li>ジョグ：主に <b>STAMINA</b> が伸びやすい練習です。</li>
-        <li>インターバル：主に <b>TOUGHNESS</b> が伸びやすい練習です。</li>
-        <li>サーキット：主に <b>TECHNIQUE</b> が伸びやすい練習です。</li>
+        <li>流し：<b>SPRINT</b> が伸びる練習です。</li>
+        <li>TT： <b>SPEED</b> が伸びる練習です。</li>
+        <li>ジョグ： <b>STAMINA</b> が伸びる練習です。</li>
+        <li>インターバル：<b>TOUGHNESS</b> が伸びる練習です。</li>
+        <li>サーキット： <b>TECHNIQUE</b> が伸びる練習です。</li>
       </ul>
 
       <h3 style="margin-top:12px;">性格補正（練習の伸び方）</h3>
@@ -1058,57 +2010,45 @@ function renderHelp(state) {
         <li>てんさい：多方面で伸びやすく、化ける可能性があります。</li>
       </ul>
 
-      <h3 style="margin-top:12px;">総体：種目ごとの重要能力（目安）</h3>
-      <ul>
-        <li>800m：主に <b>SPRINT</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
-        <li>1500m：主に <b>SPRINT</b> と <b>SPEED</b>、さらに <b>STAMINA</b> も影響します。</li>
-        <li>3000mSC：主に <b>SPEED</b>・<b>STAMINA</b> に加えて、<b>TECHNIQUE</b> の影響が出やすいです。</li>
-        <li>5000m：主に <b>SPEED</b> と <b>STAMINA</b>、さらに <b>TOUGHNESS</b> も効きやすいです。</li>
-        <li>5000mW：主に <b>TOUGHNESS</b> と <b>TECHNIQUE</b> が重要になりやすいです。</li>
-      </ul>
-
-      <h3 style="margin-top:12px;">駅伝：区間ごとの重要能力（目安）</h3>
-      <ul>
-        <li>1区 10000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
-        <li>2区 3000m：主に <b>SPRINT</b>・<b>SPEED</b> と <b>STAMINA</b> のバランスが効きやすいです。</li>
-        <li>3区 8000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
-        <li>4区 8000m：主に <b>STAMINA</b> と <b>TOUGHNESS</b> が重要になりやすいです。</li>
-        <li>5区 3000m：主に <b>SPRINT</b>・<b>SPEED</b> と <b>STAMINA</b> のバランスが効きやすいです。</li>
-        <li>6区 5000m：主に <b>SPEED</b> と <b>STAMINA</b> に加えて、<b>TOUGHNESS</b> も影響します。</li>
-        <li>7区 5000m：主に <b>SPEED</b> と <b>STAMINA</b> に加えて、<b>TOUGHNESS</b> も影響します。</li>
-      </ul>
-
       <h3 style="margin-top:12px;">大会の出場条件</h3>
       <ul>
-      　<li>総体は県総体までは各種目7位内、地域総体で5位以内に入ると次の総体に出場できます。</li>
-        <li>駅伝は、地区以外（県/地域/全国）では「前大会で5位以内」の条件を満たさないと出場できません。</li>
-        <li>新人駅伝は全国駅伝で10位以内に入ると出場できます。</li>
+        <li>総体（自校）：地区総体は自由に出場、県/地域/全国は前大会通過者のみ出場できます。</li>
+        <li>総体（通過条件）：地区→県は各種目7位以内、県→地域は各種目7位以内、地域→全国は各種目5位以内です。</li>
+        <li>兵庫県駅伝の参加校：阪神8、神戸9、東播7、西播6、丹有3、淡路2、但馬2（合計37校）です。</li>
+      　<li>近畿駅伝は兵庫駅伝で6位以内に入ると出場できます。</li>
+        <li>全国駅伝の出場校：県駅伝は各都道府県1校（北海道のみ2校）+ 各地域駅伝の最上位1校です。</li>
+        <li>新人駅伝の出場校：全国駅伝上位10校 + それに含まれない兵庫県駅伝上位10校（計20校）です。</li>
       </ul>
 
-      <h3 style="margin-top:12px;">駅伝結果の見方（順位推移）</h3>
+      <h3 style="margin-top:12px;">新入生スカウト人数</h3>
       <ul>
-        <li>駅伝の結果画面では、各区ごとに「区間順位」と「その時点の累積順位（順位推移）」を確認できます。</li>
-        <li>累積順位は、各区終了時点での合計タイム順です。</li>
+        <li>基本は1人です。</li>
+        <li>県駅伝に出場：2人、近畿駅伝に出場：3人。</li>
+        <li>近畿駅伝5位以内：4人、全国駅伝5位以内：5人。</li>
       </ul>
 
-      <h3 style="margin-top:12px;">年度末（3月4週）の処理</h3>
+      <h3 style="margin-top:12px;">他大会結果を見られる期間</h3>
       <ul>
-        <li>3月4週目の最後に、次の順で処理が行われます。</li>
-        <li>① 設備強化：設備を1つ選んでレベルを1上げます。</li>
-        <li>② 新入生スカウト：候補10人から最大n人選びます（nはその年の駅伝成績で決まります）。</li>
-        <li>③ 年度更新：3年生引退→進級→新1年生が加入します（新入生5人の枠はスカウト生が優先されます）。</li>
+        <li>5月2〜3週：兵庫 各地区総体。</li>
+        <li>6月1〜2週：近畿 各県総体。</li>
+        <li>6月4週〜7月3週：各地域総体。</li>
+        <li>10月3週：兵庫 各地区駅伝。</li>
+        <li>11月1週：近畿 各県駅伝。</li>
+        <li>11月3〜4週、12月1〜2週：各地域駅伝。</li>
       </ul>
 
-      <h3 style="margin-top:12px;">スカウト人数（駅伝成績による）</h3>
+      <h3 style="margin-top:12px;">キャプテン補正</h3>
       <ul>
-        <li>全国駅伝 優勝：5人</li>
-        <li>全国駅伝 出場：4人</li>
-        <li>地域駅伝 出場：3人</li>
-        <li>県駅伝 出場：2人</li>
-        <li>それ以外：1人</li>
+        <li>4月1週の練習後にキャプテンを指名します（不在時は再指名）。</li>
+        <li>練習補正：性格に応じて効果が変わります。</li>
+        <li>たんきは夏の練習の能力の伸びが大きくなります。</li>
+        <li>せっかちは3年生の能力の伸びが大きくなります。</li>
+        <li>おおらかは2年生の能力の伸びが大きくなります。</li>
+        <li>がんこは冬の練習の能力の伸びが大きくなります。</li>
+        <li>きようは1年生の能力の伸びが大きくなります。</li>
+        <li>ふつうは総体のタイムが出やすくなります。</li>
+        <li>てんさいは駅伝のタイムが出やすくなります。</li>
       </ul>
-
-   
 
       <div class="row" style="margin-top:14px;">
         <button class="secondary" id="back">戻る</button>
@@ -1219,25 +2159,41 @@ function renderRecordResult(state, result) {
   document.querySelector("#ok").onclick = () => goNextWeek(state);
 }
 
-function renderSoutaiResult(state, result) {
-  saveGame(state);
+function renderSoutaiResult(state, result, options = {}) {
+  const doSave = options.save !== false;
+  const okLabel = options.okLabel ?? "OK（次の週へ）";
+  const onOk = options.onOk ?? (() => goNextWeek(state));
+
+  if (doSave) saveGame(state);
+
+  const advanceTextSoutai = (() => {
+    if (result.stage === "district") return "通過判定：各種目7位以内で県総体へ";
+    if (result.stage === "prefecture") return "通過判定：各種目7位以内で地域総体へ";
+    if (result.stage === "region") return "通過判定：各種目5位以内で全国総体へ";
+    return "通過判定：全国総体は最終大会です";
+  })();
 
   const evOrder = ["800", "1500", "3000sc", "5000", "5000w"];
+  const showPref = result.stage === "region" || result.stage === "national";
   const sections = evOrder.map(ev => {
     const er = result.events[ev];
     if (!er) return "";
 
     const list = er.type === "withFinal" ? er.final : er.overall;
 
-    const top = list.slice(0, 10).map((x, i) => `
+    const top = list.slice(0, 10).map((x, i) => {
+      const pref = prefectureOfSchool(state, x.school);
+      return `
       <tr>
         <td>${i + 1}</td>
         <td>${x.school}</td>
+        ${showPref ? `<td>${pref}</td>` : ""}
         <td>${x.isPlayer ? "自校" : ""}</td>
         <td>${x.athlete.name}（${x.athlete.grade}年）</td>
         <td>${x.timeText}</td>
       </tr>
-    `).join("");
+    `;
+    }).join("");
 
     let playerRows = [];
 
@@ -1308,7 +2264,7 @@ function renderSoutaiResult(state, result) {
       <div style="overflow:auto;">
         <table style="width:100%; border-collapse:collapse; min-width:560px;">
           <thead>
-            <tr><th>順位</th><th>学校</th><th></th><th>選手</th><th>タイム</th></tr>
+            <tr><th>順位</th><th>学校</th>${showPref ? "<th>都道府県</th>" : ""}<th></th><th>選手</th><th>タイム</th></tr>
           </thead>
           <tbody>${top}</tbody>
         </table>
@@ -1325,28 +2281,64 @@ function renderSoutaiResult(state, result) {
     `;
   }).join("");
 
+  const overallRanking = (result.overallRanking ?? []).slice(0, 10).map(x => {
+    const pref = prefectureOfSchool(state, x.school);
+    return `
+    <tr>
+      <td>${x.rank}</td>
+      <td>${x.school}</td>
+      ${showPref ? `<td>${pref}</td>` : ""}
+      <td>${x.points}</td>
+      <td>${x.firsts}</td>
+      <td>${x.seconds}</td>
+      <td>${x.thirds}</td>
+      <td>${x.top10}</td>
+    </tr>
+  `;
+  }).join("") || `<tr><td colspan="${showPref ? 8 : 7}" style="color:#777;">集計なし</td></tr>`;
+
   app.innerHTML = `
     <div class="card">
       <h2>${result.title} 結果</h2>
       <p style="color:#555;">${result.when}</p>
+      <p style="color:#555;">${advanceTextSoutai}</p>
+      <h3 style="margin-top:14px;">総合得点ランキング</h3>
+      <div style="overflow:auto;">
+        <table style="width:100%; border-collapse:collapse; min-width:720px;">
+          <thead>
+            <tr><th>順位</th><th>学校</th>${showPref ? "<th>都道府県</th>" : ""}<th>得点</th><th>1位</th><th>2位</th><th>3位</th><th>10位以内</th></tr>
+          </thead>
+          <tbody>${overallRanking}</tbody>
+        </table>
+      </div>
       ${sections}
       <div class="row" style="margin-top:14px;">
-        <button id="ok">OK（次の週へ）</button>
+        <button id="ok">${okLabel}</button>
       </div>
     </div>
   `;
-  document.querySelector("#ok").onclick = () => goNextWeek(state);
+  document.querySelector("#ok").onclick = () => onOk();
 }
 
-function renderEkidenResult(state, result) {
-  const top10 = result.ranking.slice(0, 10).map(x => `
+function renderEkidenResult(state, result, options = {}) {
+  const okLabel = options.okLabel ?? "OK（次の週へ）";
+  const onOk = options.onOk ?? (() => goNextWeek(state));
+
+  const showSource = result.stage === "region" || result.stage === "national";
+  const sourceLabelHeader = "出場元";
+
+  const top10 = result.ranking.slice(0, 10).map(x => {
+    const source = ekidenSourceLabel(state, result, x.school);
+    return `
     <tr>
       <td>${x.rank}</td>
       <td>${x.school}</td>
+      ${showSource ? `<td>${source}</td>` : ""}
       <td>${x.isPlayer ? "自校" : ""}</td>
       <td>${x.totalText}</td>
     </tr>
-  `).join("");
+  `;
+  }).join("");
 
   const my = result.ranking.find(x => x.isPlayer);
   const legs = (my?.legs ?? []).map(l => `
@@ -1358,9 +2350,19 @@ function renderEkidenResult(state, result) {
     </tr>
   `).join("");
 
-  const q = result.type === "ekiden"
-    ? `自校順位：${result.myRank}位 / 通過：${result.cleared ? "YES" : "NO"}（5位以内）`
-    : `自校順位：${result.myRank}位`;
+  const q = (() => {
+    // 通過判定は「自校が出場している本大会」かつ「地区/県駅伝」のみ表示
+    if (result.type !== "ekiden" || !my) return "";
+    if (result.stage === "district") {
+      const clearedDistrict = result.myRank <= 9;
+      return `自校順位：${result.myRank}位 / 通過：${clearedDistrict ? "YES" : "NO"}（9位以内で県駅伝へ）`;
+    }
+    if (result.stage === "prefecture") {
+      const clearedPrefecture = result.myRank <= 6;
+      return `自校順位：${result.myRank}位 / 通過：${clearedPrefecture ? "YES" : "NO"}（6位以内で近畿駅伝へ）`;
+    }
+    return "";
+  })();
 
   const splitBlocks = (result.splits ?? []).map(sp => {
     const rows = (sp.rows ?? []).map(r => `
@@ -1393,13 +2395,13 @@ function renderEkidenResult(state, result) {
     <div class="card">
       <h2>${result.title} 結果</h2>
       <p style="color:#555;">${result.when}</p>
-      <p style="color:#555;">${q}</p>
+      ${q ? `<p style="color:#555;">${q}</p>` : ""}
 
       <h3 style="margin-top:14px;">総合順位（上位10）</h3>
       <div style="overflow:auto;">
         <table style="width:100%; border-collapse:collapse; min-width:520px;">
           <thead>
-            <tr><th>順位</th><th>学校</th><th></th><th>総合タイム</th></tr>
+            <tr><th>順位</th><th>学校</th>${showSource ? `<th>${sourceLabelHeader}</th>` : ""}<th></th><th>総合タイム</th></tr>
           </thead>
           <tbody>${top10}</tbody>
         </table>
@@ -1419,11 +2421,11 @@ function renderEkidenResult(state, result) {
       ${splitBlocks}
 
       <div class="row" style="margin-top:14px;">
-        <button id="ok">OK（次の週へ）</button>
+        <button id="ok">${okLabel}</button>
       </div>
     </div>
   `;
-  document.querySelector("#ok").onclick = () => goNextWeek(state);
+  document.querySelector("#ok").onclick = () => onOk();
 }
 
 // --- 年度更新 ---
@@ -1447,6 +2449,9 @@ function runYearUpdate(state) {
   state.newcomerEkiden.eligibleSchools = [];
   state.newcomerEkiden.top10 = [];
   state.newcomerEkiden.sourceWhen = null;
+
+  // 年度更新で captainId が無効になり得るので救済
+  ensureCaptain(state);
 }
 
 // --- ラベル ---

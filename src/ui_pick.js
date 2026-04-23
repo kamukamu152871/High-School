@@ -12,12 +12,80 @@ export function renderPicker(app, mode, state, context) {
       excludeGrade3: true,
     });
   }
+  if (mode === "captain") return renderCaptainPicker(app, state, context);
   throw new Error("unknown picker mode");
 }
 
 function btn(html, id) { return `<button id="${id}">${html}</button>`; }
 function smallBtn(html, id) { return `<button id="${id}" style="background:#444;">${html}</button>`; }
 function athleteLabel(a) { return `${a.grade}年 ${a.name}（${a.personality} / 総合${a.overall}）`; }
+function athleteAbilitiesText(a) {
+  return `SPRINT ${Math.floor(a.abilities.sprint)} / SPEED ${Math.floor(a.abilities.speed)} / STAMINA ${Math.floor(a.abilities.stamina)} / TOUGHNESS ${Math.floor(a.abilities.toughness)} / TECHNIQUE ${Math.floor(a.abilities.technique)}`;
+}
+function athleteLabelWithAbilities(a) {
+  return `${athleteLabel(a)} / ${athleteAbilitiesText(a)}`;
+}
+
+// ===== キャプテン指名 =====
+// - 3年生から1人選ぶ
+// - onConfirm(captainId)
+function renderCaptainPicker(app, state, { onCancel, onConfirm, title = "キャプテン指名" }) {
+  const candidates = (state.athletes ?? []).filter(a => a.grade === 3);
+  let scrollTop = 0;
+
+  function draw() {
+    const prevList = app.querySelector('[data-scroll="captain-list"]');
+    if (prevList) scrollTop = prevList.scrollTop;
+
+    const rows = candidates.map(a => `
+      <div style="padding:10px;border-top:1px solid #eee;">
+        <label style="display:flex; gap:10px; align-items:flex-start;">
+          <input type="radio" name="cap" value="${a.id}" style="margin-top:5px;" />
+          <div style="flex:1;">
+            <div style="font-weight:800;">${athleteLabel(a)}</div>
+            <div style="color:#555; margin-top:4px;">
+              SPRINT ${Math.floor(a.abilities.sprint)} / SPEED ${Math.floor(a.abilities.speed)} /
+              STAMINA ${Math.floor(a.abilities.stamina)} / TOUGHNESS ${Math.floor(a.abilities.toughness)} /
+              TECHNIQUE ${Math.floor(a.abilities.technique)}
+            </div>
+          </div>
+        </label>
+      </div>
+    `).join("") || `<div style="color:#b00;">3年生がいないためキャプテンを選べません。</div>`;
+
+    app.innerHTML = `
+      <div class="card">
+        <h2>${title}</h2>
+        <p style="color:#555;">3年生からキャプテンを1人選んでください。</p>
+
+        <div data-scroll="captain-list" style="max-height:60vh; overflow:auto; border:1px solid #eee; border-radius:8px;">
+          ${rows}
+        </div>
+
+        <div class="row" style="margin-top:12px;">
+          ${btn("決定", "ok")}
+          ${smallBtn("戻る", "cancel")}
+        </div>
+
+        <p style="margin-top:8px; color:#777;">
+          ※キャプテンの性格により、練習や大会に効果が発生します。
+        </p>
+      </div>
+    `;
+
+    const list = app.querySelector('[data-scroll="captain-list"]');
+    if (list) list.scrollTop = scrollTop;
+
+    document.querySelector("#ok").onclick = () => {
+      const v = app.querySelector('input[name="cap"]:checked')?.value ?? "";
+      if (!v) return;
+      onConfirm(v);
+    };
+    document.querySelector("#cancel").onclick = () => onCancel();
+  }
+
+  draw();
+}
 
 // ===== 記録会 =====
 function renderRecordPicker(app, state, { onCancel, onConfirm }) {
@@ -50,6 +118,7 @@ function renderRecordPicker(app, state, { onCancel, onConfirm }) {
       return `
         <div style="padding:8px;border-top:1px solid #eee;">
           <div style="font-weight:700;">${athleteLabel(a)}</div>
+          <div style="margin-top:4px;color:#555;">${athleteAbilitiesText(a)}</div>
           <div style="margin-top:6px;">${options}</div>
         </div>
       `;
@@ -110,7 +179,7 @@ function renderSoutaiPicker(app, state, {
   allowedEvents = null,
   allowedPairs = null,
   readOnly = false,
-  fixedPicks = null, // ★追加：県以降で使う確定枠 [{athlete,event}]
+  fixedPicks = null, // 県以降で使う確定枠 [{athlete,event}]
   onCancel,
   onConfirm
 }) {
@@ -164,7 +233,6 @@ function renderSoutaiPicker(app, state, {
     picks.splice(0, picks.length);
     const src = fixedPicks ?? [];
     for (const p of src) {
-      // allowedEvents がある場合の保険
       if (events.includes(p.event)) picks.push(p);
     }
   }
@@ -201,6 +269,7 @@ function renderSoutaiPicker(app, state, {
       return `
         <div style="padding:8px;border-top:1px solid #eee;">
           <div style="font-weight:700;">${athleteLabel(a)} / 出場数 ${used}/2</div>
+          <div style="margin-top:4px;color:#555;">${athleteAbilitiesText(a)}</div>
           <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px;">
             ${readOnly ? `<span style="color:#777;">（確認のみ）</span>` : addButtons}
           </div>
@@ -304,18 +373,42 @@ function renderEkidenPicker(app, state, { onCancel, onConfirm, title = "出場�
   function usedSet() {
     return new Set(Array.from(picks.values()));
   }
-  function isValid() {
-    return sections.every(s => picks.get(s.leg)) && usedSet().size === 7;
+  function validate() {
+    const missingLegs = sections.filter(s => !picks.get(s.leg)).map(s => s.leg);
+
+    const cnt = new Map();
+    for (const aid of picks.values()) {
+      cnt.set(aid, (cnt.get(aid) ?? 0) + 1);
+    }
+    const duplicateCount = Array.from(cnt.values()).filter(v => v >= 2).length;
+
+    const invalidAthleteCount = sections
+      .map(s => picks.get(s.leg))
+      .filter(Boolean)
+      .filter(aid => !candidates.some(a => a.id === aid))
+      .length;
+
+    if (missingLegs.length > 0) {
+      return { ok: false, text: `未選択の区間があります（${missingLegs.join(",")}区）` };
+    }
+    if (duplicateCount > 0) {
+      return { ok: false, text: "同じ選手が複数区間に選ばれています" };
+    }
+    if (invalidAthleteCount > 0) {
+      return { ok: false, text: "選手データが不正です。選び直してください" };
+    }
+    return { ok: true, text: "OK：確定できます" };
   }
 
   function draw() {
     const used = usedSet();
+    const v = validate();
 
     const secBlocks = sections.map(s => {
       const cur = picks.get(s.leg) ?? "";
       const options = candidates.map(a => {
         const disabled = (used.has(a.id) && a.id !== cur) ? "disabled" : "";
-        return `<option value="${a.id}" ${a.id === cur ? "selected" : ""} ${disabled}>${athleteLabel(a)}</option>`;
+        return `<option value="${a.id}" ${a.id === cur ? "selected" : ""} ${disabled}>${athleteLabelWithAbilities(a)}</option>`;
       }).join("");
 
       return `
@@ -348,8 +441,8 @@ function renderEkidenPicker(app, state, { onCancel, onConfirm, title = "出場�
           ${smallBtn("戻る", "cancel")}
         </div>
 
-        <p style="margin-top:8px;color:${isValid() ? "#0a0" : "#b00"};">
-          ${isValid() ? "OK：確定できます" : "未選択の区間があるか、重複があります"}
+        <p style="margin-top:8px;color:${v.ok ? "#0a0" : "#b00"};">
+          ${v.text}
         </p>
       </div>
     `;
@@ -368,12 +461,16 @@ function renderEkidenPicker(app, state, { onCancel, onConfirm, title = "出場�
     document.querySelector("#clear").onclick = () => { picks.clear(); draw(); };
 
     document.querySelector("#ok").onclick = () => {
-      if (!isValid()) return;
+      const status = validate();
+      if (!status.ok) return;
+
       const arr = sections.map(s => {
         const aid = picks.get(s.leg);
         const a = candidates.find(x => x.id === aid);
         return { leg: s.leg, event: s.event, athlete: a };
       });
+
+      if (arr.some(x => !x.athlete)) return;
       onConfirm(arr);
     };
     document.querySelector("#cancel").onclick = () => onCancel();
