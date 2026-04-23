@@ -41,8 +41,3 @@ export function runNewcomerEkiden(state, schools, playerPicks) {
     title: "新人駅伝",
     excludeGrade3: true,
   });
-<<<<<<< HEAD
-}
-=======
-}
->>>>>>> aaa7795231caf1858ae34576ba7228ae7a907856
