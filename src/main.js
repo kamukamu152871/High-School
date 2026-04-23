@@ -111,6 +111,9 @@ function ensureAchievements(state) {
 function ensureWorldSeasonResults(state) {
   state.world ??= { schools: null, season: {}, history: [] };
   state.world.season ??= {};
+  state.world.season.lastHyogoEkidenQualifiers ??= [];
+  state.world.season.lastHyogoEkidenTop10 ??= [];
+  state.world.season.lastNationalEkidenTop10 ??= [];
   state.world.season.otherResults ??= {
     soutai: { hyogoDistrict: {}, kinkiPrefecture: {}, regionBlocks: {} },
     ekiden: {
@@ -324,42 +327,124 @@ function generateOtherEkidenAfterDistrict(state, kobeResult = null) {
     };
   }
   state.world.season.otherResults.ekiden.hyogoDistrict = out;
+  storeHyogoPrefEkidenQualifiers(state);
+}
+
+const HYOGO_EKIDEN_SLOTS = {
+  hanshin: 8,
+  kobe: 9,
+  toban: 7,
+  seiban: 6,
+  tanyu: 3,
+  awaji: 2,
+  tajima: 2,
+};
+
+function storeHyogoPrefEkidenQualifiers(state) {
+  ensureWorldSeasonResults(state);
+
+  const districtResults = state.world.season.otherResults?.ekiden?.hyogoDistrict ?? {};
+  const qualifiers = [];
+  const seen = new Set();
+
+  for (const [districtKey, slots] of Object.entries(HYOGO_EKIDEN_SLOTS)) {
+    const ranked = districtResults[districtKey]?.result?.ranking ?? [];
+    for (const row of ranked.slice(0, slots)) {
+      const schoolName = row?.school;
+      if (!schoolName || seen.has(schoolName)) continue;
+      seen.add(schoolName);
+      qualifiers.push(schoolName);
+    }
+  }
+
+  state.world.season.lastHyogoEkidenQualifiers = qualifiers;
+  return qualifiers;
 }
 
 // 兵庫県駅伝の出場条件：各地区で定められた順位以内の高校を選抜
 function buildHyogoPrefEkidenTeams(state, options = {}) {
   const excludePlayer = options.excludePlayer ?? true;
   ensureWorldSeasonResults(state);
-  const districtResults = state.world.season.otherResults?.ekiden?.hyogoDistrict ?? {};
-  
-  // 地区ごとのカットオフ：阪神8位、神戸9位、東播7位、西播6位、丹有3位、淡路2位、但馬2位
-  const cutoffByDistrict = {
-    hanshin: 8,
-    kobe: 9,
-    toban: 7,
-    seiban: 6,
-    tanyu: 3,
-    awaji: 2,
-    tajima: 2,
-  };
-  
-  const qualifiedSchoolNames = new Set();
-  for (const [districtKey, cutoff] of Object.entries(cutoffByDistrict)) {
-    const districtResult = districtResults[districtKey];
-    if (districtResult?.result?.ranking) {
-      const ranked = districtResult.result.ranking.slice(0, cutoff);
-      for (const r of ranked) {
-        if (!r?.school) continue;
-        if (excludePlayer && r.school === state.teamName) continue;
-        qualifiedSchoolNames.add(r.school);
-      }
-    }
+  let qualifiedSchoolNames = state.world.season.lastHyogoEkidenQualifiers ?? [];
+  if (qualifiedSchoolNames.length === 0) {
+    qualifiedSchoolNames = storeHyogoPrefEkidenQualifiers(state);
   }
 
   const worldByName = new Map((state.world?.schools ?? []).map(s => [s.name, s]));
   return Array.from(qualifiedSchoolNames.values())
+    .filter(name => !(excludePlayer && name === state.teamName))
     .map(name => worldByName.get(name))
     .filter(Boolean);
+}
+
+function buildNationalEkidenSimulationSchools(state) {
+  ensureWorldSeasonResults(state);
+
+  const winners = state.world.season.otherResults?.ekiden?.nationalWinnerBySchool ?? {};
+  const qualified = state.world.season.otherResults?.ekiden?.nationalQualifiedBySchool ?? {};
+  const worldByName = new Map((state.world?.schools ?? []).map(s => [s.name, s]));
+
+  return Array.from(new Set(Object.keys(winners).concat(Object.keys(qualified))))
+    .filter(name => name !== state.teamName)
+    .map(name => worldByName.get(name))
+    .filter(Boolean);
+}
+
+function updateNewcomerEligibilityFromNationalResult(state, nationalResult) {
+  ensureAchievements(state);
+  ensureWorldSeasonResults(state);
+
+  const newcomerInfo = buildNewcomerEligibleSchoolsFromNationalResult(state, nationalResult);
+  state.world.season.lastNationalEkidenTop10 = newcomerInfo.nationalTop10.map((x, i) => ({
+    school: x.school,
+    rank: i + 1,
+  }));
+  state.newcomerEkiden.top10 = newcomerInfo.nationalTop10;
+  state.newcomerEkiden.eligibleSchools = newcomerInfo.eligibleSchools;
+  state.newcomerEkiden.sourceWhen = nationalResult?.when ?? null;
+}
+
+function ensureNationalEkidenSourceMaps(state) {
+  ensureWorldSeasonResults(state);
+
+  const winners = state.world.season.otherResults?.ekiden?.nationalWinnerBySchool ?? {};
+  const qualified = state.world.season.otherResults?.ekiden?.nationalQualifiedBySchool ?? {};
+  if (Object.keys(winners).length > 0 || Object.keys(qualified).length > 0) return;
+
+  let prefMap = state.world.season.otherResults?.ekiden?.kinkiPrefecture ?? {};
+  if (Object.keys(prefMap).length === 0) {
+    generateKinkiPrefEkidenAfterPrefecture(state);
+    prefMap = state.world.season.otherResults?.ekiden?.kinkiPrefecture ?? {};
+  }
+
+  const schoolSet = new Set();
+  for (const info of Object.values(prefMap)) {
+    const ranked = info?.result?.ranking ?? [];
+    for (const row of ranked.slice(0, 6)) {
+      if (!row?.school || row.school === state.teamName) continue;
+      schoolSet.add(row.school);
+    }
+  }
+
+  const schools = Array.from(schoolSet.values())
+    .map(name => (state.world?.schools ?? []).find(s => s.name === name))
+    .filter(Boolean);
+
+  if (schools.length === 0) return;
+
+  const kinkiResult = runEkidenSimulation(state, "region", schools, "近畿地区駅伝");
+  generateRegionEkidenAfterRegion(state, kinkiResult);
+}
+
+function simulateNationalEkidenAndUpdateNewcomer(state) {
+  ensureNationalEkidenSourceMaps(state);
+
+  const schools = buildNationalEkidenSimulationSchools(state);
+  if (schools.length === 0) return null;
+
+  const nationalResult = runEkidenSimulation(state, "national", schools, "全国駅伝");
+  updateNewcomerEligibilityFromNationalResult(state, nationalResult);
+  return nationalResult;
 }
 
 function buildNewcomerEligibleSchoolsFromNationalResult(state, nationalResult) {
@@ -1120,6 +1205,11 @@ function canEnterNewcomerEkiden(state) {
 }
 
 function renderEkidenNotQualified(state, stageKey) {
+  if (stageKey === "national") {
+    simulateNationalEkidenAndUpdateNewcomer(state);
+    safeSaveGame(state);
+  }
+
   app.innerHTML = `
     <div class="card">
       <h2>${stageTitleEkiden(stageKey)}</h2>
@@ -1672,11 +1762,7 @@ function openMeetFlow(state, meet) {
         if (meet.stage === "region") state.scout.lastEkidenTier = result.myRank <= 5 ? "region_top5" : "region_entry";
         if (meet.stage === "national") {
           state.scout.lastEkidenTier = result.myRank <= 5 ? "national_top5" : "region_top5";
-          ensureAchievements(state);
-          const newcomerInfo = buildNewcomerEligibleSchoolsFromNationalResult(state, result);
-          state.newcomerEkiden.top10 = newcomerInfo.nationalTop10;
-          state.newcomerEkiden.eligibleSchools = newcomerInfo.eligibleSchools;
-          state.newcomerEkiden.sourceWhen = result.when ?? null;
+          updateNewcomerEligibilityFromNationalResult(state, result);
         }
 
         state.carry.ekiden.next = result.top5Teams ?? [];
