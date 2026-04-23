@@ -382,6 +382,12 @@ function buildNewcomerEligibleSchoolsFromNationalResult(state, nationalResult) {
   ensureWorldSeasonResults(state);
   let hyogoPrefRanking = state.world.season.otherResults?.ekiden?.kinkiPrefecture?.["兵庫"]?.result?.ranking ?? [];
   if (hyogoPrefRanking.length === 0) {
+    hyogoPrefRanking = (state.world.season.lastHyogoEkidenTop10 ?? []).map(x => ({
+      school: x.school,
+      rank: x.rank,
+    }));
+  }
+  if (hyogoPrefRanking.length === 0) {
     generateKinkiPrefEkidenAfterPrefecture(state);
     hyogoPrefRanking = state.world.season.otherResults?.ekiden?.kinkiPrefecture?.["兵庫"]?.result?.ranking ?? [];
   }
@@ -879,7 +885,13 @@ function updateAchievementsFromEkiden(state, stageKey, result, category = "ekide
 function buildNationalSoutaiCarryFromOtherRegions(state) {
   ensureWorldSeasonResults(state);
 
-  const blockMap = state.world.season.otherResults?.soutai?.regionBlocks ?? {};
+  let blockMap = state.world.season.otherResults?.soutai?.regionBlocks ?? {};
+  if (Object.keys(blockMap).length === 0) {
+    const kinkiSchools = worldSchoolsByFilter(state, s => BLOCKS.kinki.prefectures.includes(s.prefecture));
+    const kinkiResult = runSoutaiSimulation(state, "region", kinkiSchools, "近畿地域総体");
+    generateRegionSoutaiAfterRegion(state, kinkiResult);
+    blockMap = state.world.season.otherResults?.soutai?.regionBlocks ?? {};
+  }
   const out = [];
 
   for (const info of Object.values(blockMap)) {
@@ -914,7 +926,13 @@ function buildNationalSoutaiCarryFromOtherRegions(state) {
 function buildRegionSoutaiCarryFromKinkiPrefectures(state) {
   ensureWorldSeasonResults(state);
 
-  const prefMap = state.world.season.otherResults?.soutai?.kinkiPrefecture ?? {};
+  let prefMap = state.world.season.otherResults?.soutai?.kinkiPrefecture ?? {};
+  if (Object.keys(prefMap).length === 0) {
+    const hyogoSchools = worldSchoolsByFilter(state, s => s.prefecture === "兵庫");
+    const hyogoResult = runSoutaiSimulation(state, "prefecture", hyogoSchools, "兵庫県総体");
+    generateKinkiPrefSoutaiAfterPrefecture(state, hyogoResult);
+    prefMap = state.world.season.otherResults?.soutai?.kinkiPrefecture ?? {};
+  }
   const out = [];
 
   for (const [pref, info] of Object.entries(prefMap)) {
