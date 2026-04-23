@@ -186,6 +186,7 @@ export function createNewGameState() {
       schools: null, // rivals.js が生成
       season: {
         // 直近の主要大会結果スナップショット（新人駅伝の出場条件などで使用）
+        lastHyogoEkidenQualifiers: [],
         lastHyogoEkidenTop10: [],     // [{school, rank}]
         lastNationalEkidenTop10: [],  // [{school, rank}]
         lastHyogoSoutaiQualifiers: null,
@@ -240,6 +241,7 @@ export function loadGame() {
 
     state.world ??= { schools: null, season: {}, history: [] };
     state.world.season ??= {};
+    state.world.season.lastHyogoEkidenQualifiers ??= [];
     state.world.season.lastHyogoEkidenTop10 ??= [];
     state.world.season.lastNationalEkidenTop10 ??= [];
     state.world.season.lastHyogoSoutaiQualifiers ??= null;
