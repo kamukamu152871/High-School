@@ -1455,7 +1455,7 @@ function renderScout(state) {
     <div class="card">
       <h2>新入生スカウト</h2>
       <p style="color:#555;">
-        候補10人から <b>${max}人まで</b> 選べます（能力は21〜60の範囲）。
+        候補10人から <b>${max}人まで</b> 選べます。
       </p>
 
       <div style="max-height:55vh; overflow:auto;">
