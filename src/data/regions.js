@@ -75,4 +75,8 @@ export function blockName(blockKey) {
   if (!blockKey) return "";
   if (BLOCKS[blockKey]) return BLOCKS[blockKey].name;
   return String(blockKey);
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> aaa7795231caf1858ae34576ba7228ae7a907856

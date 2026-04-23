@@ -539,4 +539,8 @@ export function allSchoolsJapan() {
   out.push(...schoolsOfPrefecture("北海道"));
   for (const pref of PREFECTURES_EXCEPT_HYOGO_AND_HOKKAIDO) out.push(...schoolsOfPrefecture(pref));
   return out;
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> aaa7795231caf1858ae34576ba7228ae7a907856
