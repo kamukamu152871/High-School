@@ -191,8 +191,3 @@ export function rivalsYearUpdate(state) {
 
   // 旧互換stubも更新しておく
   state.rivals = buildLegacyRivalsStub(state.world.schools);
-<<<<<<< HEAD
-}
-=======
-}
->>>>>>> aaa7795231caf1858ae34576ba7228ae7a907856
