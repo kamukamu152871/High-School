@@ -298,13 +298,7 @@ export function runHyogoPrefectureEkiden(state, playerSchool, playerPicks, when)
   const qs = buildHyogoPrefectureEkidenSchools(state);
   const schoolNames = Array.from(new Set(qs.map(x => x.school)));
 
-  const schools = schoolNames
-    .map(name => getWorldSchool(state, name))
-    .filter(Boolean)
-    .map(s => ({ ...schoolBaseFromWorld(s), isPlayer: false }));
-
-  const schoolsWithPlayer = schools.concat([{ ...playerSchool }]);
-  const res = runEkiden(state, "hyogo", schoolsWithPlayer, playerPicks, { when, title: "兵庫県駅伝" });
+  const res = runEkiden(state, "hyogo", playerPicks, { when, title: "兵庫県駅伝", eligibleSchools: schoolNames });
 
   // 兵庫Top10保存（新人駅伝用）
   state.world.season.lastHyogoEkidenTop10 = (res.ranking ?? []).slice(0, 10).map(x => ({ school: x.school, rank: x.rank }));
