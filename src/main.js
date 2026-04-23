@@ -1455,7 +1455,7 @@ function renderScout(state) {
     <div class="card">
       <h2>新入生スカウト</h2>
       <p style="color:#555;">
-        候補10人から <b>${max}人まで</b> 選べます。
+        候補10人から <b>${max}人まで</b> 選べます（能力は21〜60の範囲）。
       </p>
 
       <div style="max-height:55vh; overflow:auto;">
@@ -1505,6 +1505,10 @@ function renderScout(state) {
   };
 }
 
+// ★★★ バグ修正箇所 ★★★
+// 旧実装: saveGame(state) を直接呼んでいたため、localStorage容量超過時に
+// 例外が投げられ renderHome が実行されず画面が進まなくなっていた。
+// 修正: safeSaveGame に変更し、容量超過時もキャッシュを削除して再試行する。
 function goNextWeek(state) {
   if (isYearUpdateWeek(state)) {
     renderFacilityUpgradeChoice(state);
@@ -1513,7 +1517,7 @@ function goNextWeek(state) {
 
   advanceWeek(state);
   state.lastTraining = null;
-  saveGame(state);
+  safeSaveGame(state); // ★ saveGame → safeSaveGame に変更
   renderHome(state);
 }
 
@@ -1585,8 +1589,13 @@ function openMeetFlow(state, meet) {
     const readOnly = meet.stage !== "district";
     const fixedPicks = readOnly ? buildPlayerFixedSoutaiPicksFromCarry(state, meet.stage) : null;
 
+    // ★★★ バグ修正箇所 ★★★
+    // 旧実装: carry のクリアなしで renderSoutaiNoEntries に飛んでいた。
+    // 修正: 出場不可時に carry.soutai.next をクリアし、safeSaveGame で確実に保存する。
     if (readOnly && (!fixedPicks || fixedPicks.length === 0)) {
       state.rivals[meet.stage] = original;
+      state.carry.soutai.next = []; // ★ 残存carryをクリア（次シーズンへの持ち越し防止）
+      safeSaveGame(state);           // ★ 保存（容量超過対策）
       renderSoutaiNoEntries(state, meet.stage);
       return;
     }
